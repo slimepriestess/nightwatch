@@ -83,6 +83,75 @@ export function resolveFoldSource(sessionId, { transcripts, foldsPath, maxHops =
   return { sid, skipped, why: `stopped after ${maxHops} hops` };
 }
 
+// A RESUMED session lives on under a new id. Picking the running session
+// from Claude Code's session list (/resume, or the picker a stray arrow key
+// opens) copies the conversation into a new transcript and ends the old one
+// with {"type":"continued-in","continuedInSessionId":...}. The bell still
+// reaches the process, but the registry still names the old id, so a fold of
+// it trims a transcript that stopped at the resume and loses everything said
+// after (2026-10-19, marginalia's hub: the goodnight and the whole sleep
+// ritual). So a fold follows the chain to its newest file first. A hop whose
+// file is missing stops the walk where the record still is.
+//
+// A pointer is followed only when its target plausibly CONTAINS the file that
+// points at it (the 10/19 review's P1/P2/P4: an empty target, a shorter one,
+// or a stale pointer would otherwise fold LESS than the record under a clean
+// row). What the real chains show (dea6fefc → aa4affc0, 3e621b0b → 1f4cab04):
+// the new file carries every user-row uuid of the old one, in order; it does
+// NOT always carry the old file's last uuid (a move mid-turn rewrites the
+// in-flight assistant row under a new uuid); its raw row count can be SMALLER
+// (fewer api-request rows), so counting rows would refuse the real incident;
+// and it never repeats the continued-in row. So the test is: every user-row
+// uuid of the pointing file appears in the target, in the same order, and the
+// target's newest timestamp is not older than the pointing file's. A refusal
+// stops the walk where the record is and says why.
+//
+// Pure reads; never writes. Returns { sid, followed: [earlier sids],
+// refused: null | { from, to, why } }.
+export function containsResume(fromEntries, toEntries) {
+  const index = new Map();
+  toEntries.forEach((e, i) => { if (e.uuid && !index.has(e.uuid)) index.set(e.uuid, i); });
+  let at = -1;
+  for (const e of fromEntries) {
+    if (e.type !== 'user' || !e.uuid) continue;
+    const i = index.get(e.uuid);
+    if (i === undefined) return { ok: false, why: `it lacks the pointing file's prompt ${e.uuid}` };
+    if (i < at) return { ok: false, why: `it holds the pointing file's prompts out of order (${e.uuid})` };
+    at = i;
+  }
+  const newest = (es) => es.reduce((m, e) => { const t = Date.parse(e.timestamp ?? ''); return Number.isFinite(t) && t > m ? t : m; }, -Infinity);
+  const from = newest(fromEntries), to = newest(toEntries);
+  if (from > to) return { ok: false, why: `it is older (newest entry ${Number.isFinite(to) ? new Date(to).toISOString() : 'none'} < ${new Date(from).toISOString()})` };
+  return { ok: true, why: '' };
+}
+
+export function followContinued(sessionId, { transcripts, maxHops = 8 }) {
+  const followed = [];
+  let sid = sessionId;
+  for (let hop = 0; hop < maxHops; hop++) {
+    const path = join(transcripts, `${sid}.jsonl`);
+    if (!existsSync(path)) break;
+    const entries = readEntries(path);
+    const next = entries.filter((e) => e.type === 'continued-in').at(-1)?.continuedInSessionId;
+    if (!next || next === sid || followed.includes(next) || !existsSync(join(transcripts, `${next}.jsonl`))) break;
+    const plausible = containsResume(entries, readEntries(join(transcripts, `${next}.jsonl`)));
+    if (!plausible.ok) return { sid, followed, refused: { from: sid, to: next, why: plausible.why } };
+    followed.push(sid);
+    sid = next;
+  }
+  return { sid, followed, refused: null };
+}
+
+// The transcript a session is LIVING in now: the end of its continued-in
+// chain (same rules as above). For the readers that judge a running session
+// by its file (nightshift's quiet, context, cannot-answer and API-error
+// checks): after a resume the old file stops growing at once, so read by the
+// registered id it looks quiet while the conversation is busy elsewhere.
+export function liveTranscriptPath(sessionId, transcripts) {
+  try { return join(transcripts, `${followContinued(sessionId, { transcripts }).sid}.jsonl`); }
+  catch { return join(transcripts, `${sessionId}.jsonl`); }
+}
+
 // CLI, for the recovery recipe and the bench:
 //   node deadwake.mjs <session-id>   → prints the resolution as JSON
 if (process.argv[1] && process.argv[1].endsWith('deadwake.mjs')) {

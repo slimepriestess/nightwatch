@@ -6,11 +6,16 @@
 // Expect: DEAD2 and DEAD1 resolve to LIVE; LIVE and WORKED resolve to
 // themselves; cannotAnswer is true only for sessions whose newest reply
 // says the prompt is too long. Temp dir only.
+// followContinued, the 2026-10-19 resume rebuilt small: OLD was resumed
+// from the session picker as MID, MID again as NEW (each old file ends in a
+// continued-in row, then Claude Code's cost-state); GONE points at a file
+// that isn't there; LOOP points at itself. Expect OLD → NEW, a missing hop
+// stops where the record is, and a self-pointer never spins.
 // Run: node wakecycle/deadwake-test.mjs   (exit 0 = all pass)
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveFoldSource, cannotAnswer } from './deadwake.mjs';
+import { resolveFoldSource, cannotAnswer, followContinued, liveTranscriptPath } from './deadwake.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'deadwake-test-'));
 const write = (sid, rows) => writeFileSync(join(dir, `${sid}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -34,6 +39,36 @@ writeFileSync(foldsPath, [
   { source: 'jsonl:DEAD1', tail: 'TAIL2' },
 ].map((r) => JSON.stringify(r)).join('\n') + '\n');
 
+const contIn = (to) => ({ type: 'continued-in', continuedInSessionId: to });
+const cost = { type: 'cost-state', totalCostUSD: 1 };
+write('OLD', [...early, contIn('MID'), cost]);
+write('MID', [...early, user('p', 'goodnight'), contIn('NEW'), cost]);
+write('NEW', [...early, user('p', 'goodnight'), reply('q', 'sleep well'), user('r', 'bell'), reply('s', 'rung written')]);
+write('GONE', [...early, contIn('ELSEWHERE')]);
+write('LOOP', [...early, contIn('LOOP')]);
+// The review's probes (10/19) and the real chains' shapes (2026-11-12, from
+// archive/transcripts: dea6fefc → aa4affc0 and 3e621b0b → 1f4cab04).
+writeFileSync(join(dir, 'EMPTY.jsonl'), '');
+write('P1', [...early, ...late, contIn('EMPTY')]);                       // target is empty
+write('SHORT', [...late, user('t', 'later')]);
+write('P2', [...early, ...late, contIn('SHORT')]);                       // target lacks P2's first prompt
+write('STALE', [...early, user('u', 'one')]);
+write('P4', [...early, user('u', 'one'), user('v', 'two'), reply('w', 'x'), contIn('STALE')]); // stale pointer: target lacks 'v'
+write('SWAP', [user('c', 'two notes'), reply('d', 'done'), ...early]);
+write('P5', [...early, ...late, contIn('SWAP')]);                        // prompts present but out of order
+const at = (row, iso) => ({ ...row, timestamp: iso });
+write('OLDER', [at(user('a', 'morning'), '2026-10-28T10:00:00Z'), at(reply('b', 'on it'), '2026-10-28T10:01:00Z')]);
+write('P6', [at(user('a', 'morning'), '2026-10-28T10:00:00Z'), at(reply('b', 'on it'), '2026-10-28T17:00:00Z'), contIn('OLDER')]); // target older
+// 3e621b0b's shape: moved mid-turn, the in-flight assistant row is rewritten
+// under a new uuid in the new file, so the old file's LAST uuid isn't there.
+write('MIDTURN', [...early, user('x', 'go'), reply('y-inflight', ''), contIn('MOVED'), cost]);
+write('MOVED', [...early, user('x', 'go'), reply('y-rewritten', 'answer'), user('z', 'next'), reply('zz', 'more')]);
+// dea6fefc's shape: the new file holds every uuid but FEWER ROWS (fewer
+// api-request rows), so a row count would refuse the real incident.
+const apiReq = { type: 'api-request', requestId: 'r' };
+write('MANYROWS', [...early, apiReq, apiReq, apiReq, apiReq, ...late, apiReq, apiReq, contIn('FEWROWS'), cost]);
+write('FEWROWS', [...early, ...late, user('zz2', 'goodnight')]);
+
 let fails = 0;
 function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  ${JSON.stringify(detail)}`}`);
@@ -51,6 +86,25 @@ try {
   check('cannotAnswer: dead and worked-then-full are true', cannotAnswer(join(dir, 'DEAD2.jsonl')) && cannotAnswer(join(dir, 'WORKED.jsonl')));
   check('cannotAnswer: a live session is false', !cannotAnswer(join(dir, 'LIVE.jsonl')));
   check('cannotAnswer: a missing file is false, never a throw', cannotAnswer(join(dir, 'NOPE.jsonl')) === false);
+  const fc = (sid) => followContinued(sid, { transcripts: dir });
+  check('a resumed session folds its newest file', fc('OLD').sid === 'NEW' && fc('OLD').followed.join() === 'OLD,MID', fc('OLD'));
+  check('the middle of a chain goes forward only', fc('MID').sid === 'NEW' && fc('MID').followed.join() === 'MID', fc('MID'));
+  check('an unresumed session is itself', fc('LIVE').sid === 'LIVE' && fc('LIVE').followed.length === 0, fc('LIVE'));
+  check('a hop to a missing file stops where the record is', fc('GONE').sid === 'GONE' && fc('GONE').followed.length === 0, fc('GONE'));
+  check('a self-pointer never spins', fc('LOOP').sid === 'LOOP', fc('LOOP'));
+  check('a missing start is itself, never a throw', fc('NOPE').sid === 'NOPE');
+  check('an intact chain reports no refusal', fc('OLD').refused === null, fc('OLD'));
+  const refusedAt = (sid, to, re) => { const f = fc(sid); return f.sid === sid && f.followed.length === 0 && f.refused?.to === to && re.test(f.refused.why); };
+  check('P1 an empty target is refused, the pointing file folds', refusedAt('P1', 'EMPTY', /lacks/), fc('P1'));
+  check('P2 a shorter target (missing an earlier prompt) is refused', refusedAt('P2', 'SHORT', /lacks the pointing file's prompt a/), fc('P2'));
+  check('P4 a stale pointer to a file without the later prompts is refused', refusedAt('P4', 'STALE', /lacks the pointing file's prompt v/), fc('P4'));
+  check('the prompts out of order is refused', refusedAt('P5', 'SWAP', /out of order/), fc('P5'));
+  check('an older target is refused', refusedAt('P6', 'OLDER', /older/), fc('P6'));
+  check('moved mid-turn (in-flight reply rewritten, last uuid absent) is still followed', fc('MIDTURN').sid === 'MOVED' && fc('MIDTURN').refused === null, fc('MIDTURN'));
+  check('a target with fewer rows but every prompt is still followed', fc('MANYROWS').sid === 'FEWROWS' && fc('MANYROWS').refused === null, fc('MANYROWS'));
+  check('liveTranscriptPath reads the end of the chain', liveTranscriptPath('OLD', dir) === join(dir, 'NEW.jsonl'));
+  check('liveTranscriptPath stays put on a refused pointer', liveTranscriptPath('P2', dir) === join(dir, 'P2.jsonl'));
+  check('liveTranscriptPath of an unresumed or missing session is its own file', liveTranscriptPath('LIVE', dir) === join(dir, 'LIVE.jsonl') && liveTranscriptPath('NOPE', dir) === join(dir, 'NOPE.jsonl'));
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
