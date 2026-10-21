@@ -6,11 +6,16 @@
 // Expect: DEAD2 and DEAD1 resolve to LIVE; LIVE and WORKED resolve to
 // themselves; cannotAnswer is true only for sessions whose newest reply
 // says the prompt is too long. Temp dir only.
+// followContinued, the 2026-10-19 resume rebuilt small: OLD was resumed
+// from the session picker as MID, MID again as NEW (each old file ends in a
+// continued-in row, then Claude Code's cost-state); GONE points at a file
+// that isn't there; LOOP points at itself. Expect OLD → NEW, a missing hop
+// stops where the record is, and a self-pointer never spins.
 // Run: node wakecycle/deadwake-test.mjs   (exit 0 = all pass)
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveFoldSource, cannotAnswer } from './deadwake.mjs';
+import { resolveFoldSource, cannotAnswer, followContinued } from './deadwake.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'deadwake-test-'));
 const write = (sid, rows) => writeFileSync(join(dir, `${sid}.jsonl`), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -34,6 +39,14 @@ writeFileSync(foldsPath, [
   { source: 'jsonl:DEAD1', tail: 'TAIL2' },
 ].map((r) => JSON.stringify(r)).join('\n') + '\n');
 
+const contIn = (to) => ({ type: 'continued-in', continuedInSessionId: to });
+const cost = { type: 'cost-state', totalCostUSD: 1 };
+write('OLD', [...early, contIn('MID'), cost]);
+write('MID', [...early, user('p', 'goodnight'), contIn('NEW'), cost]);
+write('NEW', [...early, user('p', 'goodnight'), reply('q', 'sleep well'), user('r', 'bell'), reply('s', 'rung written')]);
+write('GONE', [...early, contIn('ELSEWHERE')]);
+write('LOOP', [...early, contIn('LOOP')]);
+
 let fails = 0;
 function check(name, ok, detail = '') {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : `  ${JSON.stringify(detail)}`}`);
@@ -51,6 +64,13 @@ try {
   check('cannotAnswer: dead and worked-then-full are true', cannotAnswer(join(dir, 'DEAD2.jsonl')) && cannotAnswer(join(dir, 'WORKED.jsonl')));
   check('cannotAnswer: a live session is false', !cannotAnswer(join(dir, 'LIVE.jsonl')));
   check('cannotAnswer: a missing file is false, never a throw', cannotAnswer(join(dir, 'NOPE.jsonl')) === false);
+  const fc = (sid) => followContinued(sid, { transcripts: dir });
+  check('a resumed session folds its newest file', fc('OLD').sid === 'NEW' && fc('OLD').followed.join() === 'OLD,MID', fc('OLD'));
+  check('the middle of a chain goes forward only', fc('MID').sid === 'NEW' && fc('MID').followed.join() === 'MID', fc('MID'));
+  check('an unresumed session is itself', fc('LIVE').sid === 'LIVE' && fc('LIVE').followed.length === 0, fc('LIVE'));
+  check('a hop to a missing file stops where the record is', fc('GONE').sid === 'GONE' && fc('GONE').followed.length === 0, fc('GONE'));
+  check('a self-pointer never spins', fc('LOOP').sid === 'LOOP', fc('LOOP'));
+  check('a missing start is itself, never a throw', fc('NOPE').sid === 'NOPE');
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

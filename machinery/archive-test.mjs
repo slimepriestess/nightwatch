@@ -10,6 +10,8 @@
 //   6. a re-fold of a SHRUNK session — the larger old copy is kept aside;
 //   7. catch-up — a session that kept writing after its fold is brought up to
 //      date at the next fold.
+//   9. a resumed session — picked from the session list, it went on under a
+//      new id; folding the belled (old) id folds and archives the new one.
 // Run: node machinery/archive-test.mjs   (exit 0 = all pass)
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -83,6 +85,7 @@ const A = 'aaaaaaaa-0000-4000-8000-000000000001';
 const B = 'bbbbbbbb-0000-4000-8000-000000000002';
 const TAIL = 'cccccccc-0000-4000-8000-000000000003';
 const DEAD = 'dddddddd-0000-4000-8000-000000000004';
+const RESUMED = 'eeeeeeee-0000-4000-8000-000000000005';
 
 try {
   // 1. Authored fold.
@@ -176,6 +179,21 @@ try {
     check('8 the next fold succeeds', r.code === 0, r.err);
     check('8 a dead process\'s staging file is swept', !existsSync(join(h.archive, `${A}.jsonl.partial-${dead}`)));
     check('8 a live process\'s staging file is left alone', existsSync(join(h.archive, `${A}.jsonl.partial-${process.pid}`)));
+  }
+  // 9. Resumed: A was picked from the session list and went on as RESUMED.
+  //    A's file ends at the resume (continued-in, then cost-state); RESUMED
+  //    holds A's turns and the goodnight after. The bell names A.
+  {
+    const h = hub();
+    transcript(h, A, 3, [{ type: 'continued-in', continuedInSessionId: RESUMED }, { type: 'cost-state', totalCostUSD: 1 }]);
+    transcript(h, RESUMED, 5);
+    const r = sleep(h, A);
+    check('9 resumed fold succeeds', r.code === 0, r.err);
+    check('9 it says out loud that it followed the resume', /RESUMED/.test(r.err), r.err);
+    check('9 the fold row names the newest file and where it came from', lastFold(h)?.source === `jsonl:${RESUMED}` && lastFold(h)?.continuedFrom?.join() === A, lastFold(h));
+    const tail = lastFold(h)?.tail ? readFileSync(join(h.transcripts, `${lastFold(h).tail}.jsonl`), 'utf8') : '';
+    check('9 the tail reaches the turns after the resume', tail.includes('prompt 4') && tail.includes('reply 4'), lastFold(h));
+    check('9 the newest file is archived, byte-identical', same(join(h.transcripts, `${RESUMED}.jsonl`), join(h.archive, `${RESUMED}.jsonl`)));
   }
 } finally {
   for (const r of roots) rmSync(r, { recursive: true, force: true });

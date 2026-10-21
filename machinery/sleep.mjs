@@ -20,7 +20,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadConfig, laneConfig } from './config.mjs';
-import { resolveFoldSource } from './deadwake.mjs';
+import { resolveFoldSource, followContinued } from './deadwake.mjs';
 import { archiveTranscript, catchUpArchive } from './archive.mjs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -224,6 +224,16 @@ const levelNum = (l) => Number(String(l).replace(/^L/, '')) || 0;
 const visible = entries.filter((e) => !(e.parent && present.has(e.parent)));
 visible.sort((a, b) => levelNum(b.level) - levelNum(a.level));
 
+// ── Resumed under a new id? Fold the newest file ──
+// Before the dead-wake walk: that one goes back to the session a wake came
+// from, this one forward to where a resumed conversation went. See
+// followContinued in deadwake.mjs.
+const continued = followContinued(sessionId, { transcripts: CFG.paths.transcripts });
+if (continued.followed.length) {
+  console.error(`sleep.mjs: RESUMED — ${[...continued.followed, continued.sid].map((s) => s.slice(0, 8)).join(' → ')} (continued-in); folding ${continued.sid.slice(0, 8)}, the newest.`);
+  sessionId = continued.sid;
+}
+
 // ── Dead wake? Fold the session it came from instead ──
 // A session woken from a tail that never got a real turn in (the newest
 // reply is "Prompt is too long", nothing of its own but errors) holds the
@@ -338,6 +348,7 @@ appendFileSync(
     target_tokens: trimOut.targetTokens ?? target,
     ...(trimOut.overshoot ? { overshoot: trimOut.overshoot } : {}),
     tail: trimOut.newSessionId,
+    ...(continued.followed.length ? { continuedFrom: continued.followed } : {}),
     ...(deadWake.skipped.length ? { deadWakesSkipped: deadWake.skipped } : {}),
     ...(archived.error ? { archiveError: archived.error } : { archived: archived.path }),
   }) + '\n',

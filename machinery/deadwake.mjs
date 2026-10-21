@@ -83,6 +83,31 @@ export function resolveFoldSource(sessionId, { transcripts, foldsPath, maxHops =
   return { sid, skipped, why: `stopped after ${maxHops} hops` };
 }
 
+// A RESUMED session lives on under a new id. Picking the running session
+// from Claude Code's session list (/resume, or the picker a stray arrow key
+// opens) copies the conversation into a new transcript and ends the old one
+// with {"type":"continued-in","continuedInSessionId":...}. The bell still
+// reaches the process, but the registry still names the old id, so a fold of
+// it trims a transcript that stopped at the resume and loses everything said
+// after (2026-10-19, marginalia's hub: the goodnight and the whole sleep
+// ritual). So a fold follows the chain to its newest file first. A hop whose
+// file is missing stops the walk where the record still is.
+//
+// Pure reads; never writes. Returns { sid, followed: [earlier sids] }.
+export function followContinued(sessionId, { transcripts, maxHops = 8 }) {
+  const followed = [];
+  let sid = sessionId;
+  for (let hop = 0; hop < maxHops; hop++) {
+    const path = join(transcripts, `${sid}.jsonl`);
+    if (!existsSync(path)) break;
+    const next = readEntries(path).filter((e) => e.type === 'continued-in').at(-1)?.continuedInSessionId;
+    if (!next || next === sid || followed.includes(next) || !existsSync(join(transcripts, `${next}.jsonl`))) break;
+    followed.push(sid);
+    sid = next;
+  }
+  return { sid, followed };
+}
+
 // CLI, for the recovery recipe and the bench:
 //   node deadwake.mjs <session-id>   → prints the resolution as JSON
 if (process.argv[1] && process.argv[1].endsWith('deadwake.mjs')) {
