@@ -43,6 +43,7 @@ jobs:
         run: |
           node gui/test/assemble-probes.mjs
           node gui/test/hubs-probes.mjs
+          node gui/test/launcher.mjs
           node skins/test/chrome-test.mjs
 
   app:
