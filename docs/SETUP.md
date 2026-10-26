@@ -169,6 +169,14 @@ covers them, but treat the first night as a trial and read its log.
   argument, so wake.sh skips (and logs) text that isn't a string, starts
   with "-" (a flag), or is a single bare word (claude could run it as a
   subcommand); the wake goes on without a prompt.
+  It has a cost, so turn it on for lanes that do things by themselves.
+  The prompt makes the wake's first full-context request at once. If
+  the person arrives hours later, that cache has expired and their first
+  message pays for the context again. That's roughly one extra
+  full-context request a day, plus whatever the agent does on its own.
+  Worth it for a lane with mail, a heartbeat or a switchboard to tend.
+  Pure overhead for a lane that just waits for its person (Terra's
+  point, 10/26).
 
 ## After the bell: finishing up
 
