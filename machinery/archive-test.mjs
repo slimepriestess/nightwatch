@@ -16,6 +16,8 @@
 //      kept aside when they shrank; a session with none gets no folder.
 //  12. a subagent that can't be copied (unreadable, a directory) is reported
 //      and never costs the session, or a later fold, its own archive;
+//  13. the guards #60's review found unpinned: an unreadable subagents/,
+//      an unreadable grown transcript, a damaged archive-side folder;
 //   9. the trim's output check — a broken-format session is refused (event +
 //      stderr, no receipt), and torn lines are counted into the fold row.
 // Run: node machinery/archive-test.mjs   (exit 0 = all pass)
@@ -286,6 +288,56 @@ try {
       check('12 another session\'s fold archives its own, past the bad file', r3.code === 0 && same(join(h.transcripts, `${B}.jsonl`), join(h.archive, `${B}.jsonl`)) && !('archiveError' in (lastFold(h) ?? {})), r3.err);
       check('12 and the catch-up still names the bad file', /COULD NOT COPY subagent agent-bad\.jsonl of aaaaaaaa/.test(r3.err), r3.err);
     } finally { chmodSync(join(sub, 'agent-bad.jsonl'), 0o644); }
+  }
+
+  // 13. The guards #60's second review found unpinned, and its residual.
+  //     (a) An unreadable <sid>/subagents on the source side: the session's
+  //     own copy lands and the folder is reported, not ARCHIVE FAILED.
+  //     (b) An unreadable source transcript that grew: that session can't be
+  //     caught up, and the folding session and the others still are.
+  //     (c) <sid>/subagents in the archive is a file: the sweep reports it,
+  //     and the session's grown transcript is still caught up.
+  {
+    const h = hub();
+    transcript(h, A, 6);
+    const sub = join(h.transcripts, A, 'subagents');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, 'agent-x.jsonl'), '{"x":1}\n');
+    chmodSync(sub, 0);
+    try {
+      const r = sleep(h, A);
+      check('13a a fold with an unreadable subagents/ succeeds', r.code === 0, r.err);
+      check('13a the session\'s own transcript is archived', same(join(h.transcripts, `${A}.jsonl`), join(h.archive, `${A}.jsonl`)));
+      check('13a no ARCHIVE FAILED, no archiveError, one subagent error', !/ARCHIVE FAILED/.test(r.err) && !('archiveError' in (lastFold(h) ?? {})) && lastFold(h)?.subagentErrors === 1, { err: r.err, row: lastFold(h) });
+      check('13a the folder is named on stderr', /COULD NOT COPY subagent subagents\/ of aaaaaaaa/.test(r.err), r.err);
+    } finally { chmodSync(sub, 0o755); }
+  }
+  {
+    const h = hub();
+    transcript(h, A, 6); sleep(h, A);
+    transcript(h, DEAD, 6); sleep(h, DEAD);
+    transcript(h, A, 9); transcript(h, DEAD, 9);
+    chmodSync(join(h.transcripts, `${A}.jsonl`), 0);
+    try {
+      transcript(h, B, 4);
+      const r = sleep(h, B);
+      check('13b a fold beside an unreadable grown transcript succeeds', r.code === 0, r.err);
+      check('13b that session can\'t be caught up, and it says so', /COULD NOT CATCH UP aaaaaaaa/.test(r.err), r.err);
+      check('13b the other grown session is still caught up', same(join(h.transcripts, `${DEAD}.jsonl`), join(h.archive, `${DEAD}.jsonl`)));
+      check('13b and the folding session archives its own', same(join(h.transcripts, `${B}.jsonl`), join(h.archive, `${B}.jsonl`)) && !('archiveError' in (lastFold(h) ?? {})), lastFold(h));
+    } finally { chmodSync(join(h.transcripts, `${A}.jsonl`), 0o644); }
+  }
+  {
+    const h = hub();
+    transcript(h, A, 6); sleep(h, A);
+    mkdirSync(join(h.archive, A), { recursive: true });
+    writeFileSync(join(h.archive, A, 'subagents'), 'not a folder\n');
+    transcript(h, A, 9);
+    transcript(h, B, 4);
+    const r = sleep(h, B);
+    check('13c a fold beside a damaged archive folder succeeds', r.code === 0, r.err);
+    check('13c the damaged session\'s grown transcript is still caught up', same(join(h.transcripts, `${A}.jsonl`), join(h.archive, `${A}.jsonl`)), r.err);
+    check('13c the sweep\'s error is said, not a COULD NOT CATCH UP', /COULD NOT COPY subagent subagents\/ \(archive\) of aaaaaaaa/.test(r.err) && !/COULD NOT CATCH UP aaaaaaaa/.test(r.err), r.err);
   }
 } finally {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
