@@ -276,11 +276,12 @@ function transcriptStats(cfg, io, sid) {
 // events.jsonl → lane states, night strip, log, alarms
 // Stuck states, most urgent first (spiralwatch's `stuck` events, Ra 10/8).
 // `window`: the fix happens in the lane's own window (a /login, a prompt).
-const STUCK_ORDER = ['too-long', 'login', 'usage-limit', 'offline', 'waiting', 'classifier', 'context', 'slept'];
+const STUCK_ORDER = ['too-long', 'login', 'usage-limit', 'request-cut', 'offline', 'waiting', 'classifier', 'context', 'slept'];
 const STUCK_CARD = {
   'too-long': { title: 'Too full to answer', window: false, cause: () => 'Every prompt comes back "Prompt is too long", so pokes and the sleep bell can\'t reach them. Fold now folds them from the last session that actually ran and opens a fresh window; if that window says the same, /clear it.' },
   login: { title: 'Logged out', window: true, cause: () => 'The session says its login expired. They can\'t do anything until someone runs /login in their window.' },
   'usage-limit': { title: 'Usage limit reached', window: false, cause: () => 'Stopped until the usage limit resets, or until their model is switched (/model).' },
+  'request-cut': { title: 'Requests cut off', window: false, cause: () => 'Their requests are being cut off as they upload (EPROTO). If this machine\'s network is fine, they may be too big: each one sends every image the session has read. A retry sends the same request. Fold now keeps only the newest images.' },
   offline: { title: 'Can\'t reach the API', window: false, cause: () => 'Connection or DNS failure. They retry on their own once the network is back.' },
   waiting: { title: 'Waiting on you', window: true, cause: (e) => `Waiting for ${Math.round((e.forMs ?? 0) / 60000)} minutes on a permission prompt or a question in their window.` },
   classifier: { title: 'Classifier stops', window: false, cause: (e) => `${e.count} tool calls denied by the auto mode classifier in 30 minutes${e.reason ? ` (latest: ${e.reason})` : ''}. They may be circling something.` },

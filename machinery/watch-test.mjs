@@ -52,6 +52,8 @@ const session = (sid, lane, { status = 'idle', statusAt = now } = {}) => {
 session('s-login', 'fable'); write('s-login', [reply('hi'), apiError('Failed to authenticate: OAuth session expired and could not be refreshed', 'authentication_failed')]);
 session('s-usage', 'fable'); write('s-usage', [reply('hi'), apiError("You've reached your Fable limit. Run /usage-credits to continue or switch models with /model.", 'rate_limit')]);
 session('s-offline', 'opus'); write('s-offline', [reply('hi'), apiError("API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", 'server_error')]);
+session('s-cut', 'opus'); write('s-cut', [reply('hi'), apiError('API Error: Unable to connect to API (EPROTO)', 'server_error')]);
+session('s-refused', 'opus'); write('s-refused', [reply('hi'), apiError('API Error: Unable to connect to API (ECONNREFUSED)', 'server_error')]);
 session('s-slept', 'opus'); write('s-slept', [reply('hi'), apiError('API Error: Your computer went to sleep mid-response. The response above may be incomplete.', 'server_error')]);
 session('s-classifier', 'fable'); write('s-classifier', [reply('hi'), denial(20, '[Irreversible Local Destruction]'), denial(5, 'Blocked by classifier'), reply('ok')]);
 session('s-context', 'opus'); write('s-context', [{ ...reply('big'), message: { ...reply('big').message, usage: { input_tokens: 100, cache_read_input_tokens: 880_000, cache_creation_input_tokens: 2_000, output_tokens: 5 } } }]);
@@ -75,13 +77,13 @@ const check = (name, got, want) => {
   ok ? pass++ : fail++;
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
 };
-const stuckBy = (evs) => Object.fromEntries(evs.filter((e) => e.kind === 'stuck').map((e) => [e.session, `${e.lane}:${e.cause}`]));
+const stuckBy = (evs) => Object.fromEntries(evs.filter((e) => e.kind === 'stuck').map((e) => [e.session, `${e.lane}:${e.cause}`]).sort(([a], [b]) => (a < b ? -1 : 1)));
 
 tick();
 const first = lines(EVENTS);
 check('each stuck state is told once, under its own agent', stuckBy(first), {
-  's-login': 'fable:login', 's-usage': 'fable:usage-limit', 's-offline': 'opus:offline', 's-slept': 'opus:slept',
-  's-classifier': 'fable:classifier', 's-waiting': 'fable:waiting', 's-toolong': 'opus:too-long',
+  's-classifier': 'fable:classifier', 's-cut': 'opus:request-cut', 's-login': 'fable:login', 's-offline': 'opus:offline', 's-refused': 'opus:offline', 's-slept': 'opus:slept',
+  's-toolong': 'opus:too-long', 's-usage': 'fable:usage-limit', 's-waiting': 'fable:waiting',
 });
 // A full-ish context is a warning, not a stuck state (Ra, 10/12).
 check('85% context is told as context-high, a warning and not an alarm', first.filter((e) => e.kind === 'context-high').map((e) => [e.session, e.alarm]), [['s-context', false]]);
@@ -109,6 +111,7 @@ append('s-offline', reply('back online'));
 const ctx = (input) => ({ ...reply('x'), message: { ...reply('x').message, usage: { input_tokens: 0, cache_read_input_tokens: input, output_tokens: 1 } } });
 append('s-context', ctx(820_000)); // between the re-arm line and the warning: the same episode
 tick();
+check('a cut-off request names the fold, not the network', [/Force fold/.test(lines(SENT).find((l) => l.kind === 'stuck' && l.cause === 'request-cut')?.body ?? ''), /connection or DNS/.test(lines(SENT).find((l) => l.kind === 'stuck' && l.cause === 'request-cut')?.body ?? '')], [true, false]);
 check('recovery clears offline, once, and sends nothing', [lines(EVENTS).slice(first.length).map((e) => `${e.kind}:${e.cause}`), lines(SENT).length - sent.length], [['stuck-cleared:offline'], 0]);
 append('s-context', ctx(500_000));
 tick();

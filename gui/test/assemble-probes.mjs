@@ -5,6 +5,7 @@
 //   node gui/test/assemble-probes.mjs
 //
 // Written by: claude-fable-5, 2026-10-06
+import { readFileSync } from 'node:fs';
 import { assemble } from '../assemble.mjs';
 
 const cfg = {
@@ -193,6 +194,13 @@ const usageLine = (id, agoMs, ctxTokens, outTokens) => JSON.stringify({
   const alertOf = (rows) => assemble(cfg, io(ev(rows)), '8h').LANES.find((x) => x.id === 'fable')?.alert ?? null;
   const off = alertOf([stuck('offline', 20)]);
   check('a stuck episode raises its card', off?.kind === 'stuck-offline' && off.title === "Can't reach the API" && off.at[0] === iso(20 * 60e3), JSON.stringify(off));
+  const cut = alertOf([stuck('request-cut', 20)]);
+  check('a cut-off request raises its own card, naming the fold', cut?.kind === 'stuck-request-cut' && cut.title === 'Requests cut off' && /Fold now/.test(cut.cause) && !/retry on their own/.test(cut.cause), JSON.stringify(cut));
+  check('a cut-off request outranks offline', alertOf([stuck('offline', 30), stuck('request-cut', 20)])?.kind === 'stuck-request-cut', 'order');
+  // Every cause the watch can name draws a card here, or its alert never reaches the app.
+  const watchCauses = [...readFileSync(new URL('../../machinery/watch.mjs', import.meta.url), 'utf8').match(/const STUCK = \{([\s\S]*?)\n\};/)[1].matchAll(/^ {2}'?([\w-]+)'?: \(/gm)].map((m) => m[1]);
+  check('the watch names at least the causes known today', watchCauses.length >= 9, watchCauses.join());
+  for (const cause of watchCauses) check(`the watch's cause ${cause} draws a card`, alertOf([stuck(cause, 20, { ratio: 0.9, count: 5, forMs: 60000 })]) != null, cause);
   const login = alertOf([stuck('login', 20)]);
   check('a fix that happens in the window offers to open it', login?.fixes?.[0]?.[1] === 'open-terminal', JSON.stringify(login?.fixes));
   check('a clear ends the episode', alertOf([stuck('offline', 20), { at: iso(5 * 60e3), kind: 'stuck-cleared', cause: 'offline', lane: 'fable' }]) == null, 'card stayed');
