@@ -49,14 +49,15 @@ const HOME = homedir();
 // spelling nightwatch#38 documents for other houses; `'"'"'` is how Claude Code wraps a single quote.
 //
 // Those words mean plumbing only on a process of its own: an MCP server, the bridge, caffeinate. Everything the agent
-// runs comes through its tool shell (`zsh -c source …shell-snapshots… && eval '…'`, seen in `ps`), so there a word is
+// runs comes through its tool shell (`zsh -c source …shell-snapshots… && eval '…'`, seen in `ps`, under a sandbox's
+// bwrap or sandbox-exec when it has one, which is why the shell isn't anchored to the line's start), so there a word is
 // only a path or an argument: tests run in ~/origin/discord-mcpl aren't plumbing. In a tool shell, plumbing is the
 // heartbeat's shape above, or a watcher that IS the command, with no real work chained to it either way. A lane's
 // `rm <notes> && <watcher>` counts as one: the rm is done by the time it waits (247 of 992 real arms, 11/04). A
 // flagged rm (`rm -rf dist`) isn't a note's. Any other chain reads as work (12 of the 992): a fold waits for it.
-const TOOL_SHELL = /^\S*sh -l?c .*(?:shell-snapshots|\beval '|pwd -P >\|)/s;
+const TOOL_SHELL = /(?:^|\s)\S*sh -c .*(?:shell-snapshots|\beval '|pwd -P >\|)/s;
 const PROCESS_WORDS = /mcpl|cc-sock|bridge|inbox-watcher|bell-watcher|caffeinate/;
-const HEARTBEAT = /\bsleep \d+ *(?:;|&&) *echo (?:"|'"'"'|')?heartbeat\b[^;&|]*(?:'|$)/;
+const HEARTBEAT = /^sleep \d+ *(?:;|&&) *echo (?:"|'"'"'|')?heartbeat\b[^;&|]*$/;
 const WATCHER_COMMAND = /^(?:rm(?: -f)?(?: +[^\s;&|<>-]\S*)+ *(?:&&|;) *)*(?:\w+=\S* +)*(?:\S*sh +)?\S*\b(?:inbox|bell)-watcher\.sh(?: +[^;&|<>]*)?$/;
 // The command a tool shell runs: inside its eval, or, with none, after its setup's last `&&`.
 const toolCommand = (args) => {
@@ -64,9 +65,14 @@ const toolCommand = (args) => {
   return (evaled ? evaled[1] : args.slice(args.lastIndexOf(' && ') + 4)).trim();
 };
 export const INFRA_PROCESS = {
-  test: (args) => HEARTBEAT.test(args)
-    || (TOOL_SHELL.test(args) ? WATCHER_COMMAND.test(toolCommand(args)) : PROCESS_WORDS.test(args)),
+  test: (args) => {
+    if (!TOOL_SHELL.test(args)) return PROCESS_WORDS.test(args);
+    const command = toolCommand(args);
+    return HEARTBEAT.test(command) || WATCHER_COMMAND.test(command);
+  },
 };
+// What a deferral's alert names: the work, since a tool shell's first 60 characters are all its own setup.
+export const busyLabel = (args) => (TOOL_SHELL.test(args) ? toolCommand(args) : args).slice(0, 60);
 // One config, one truth (item E; the 10/5 decoy-checkpoint failure is the
 // receipt). Env overrides are applied INSIDE the loader, so the pre-E
 // spellings (WEFT_NIGHT_SLEEP etc.) keep working without a second ?? chain
@@ -493,7 +499,7 @@ const io = {
         let args = '';
         try { args = execFileSync('ps', ['-o', 'args=', '-p', child], { encoding: 'utf8' }).trim(); } catch { continue; }
         if (INFRA_PROCESS.test(args)) continue;
-        busy.push(args.slice(0, 60));
+        busy.push(busyLabel(args));
         try {
           const grand = execFileSync('pgrep', ['-P', child], { encoding: 'utf8' }).trim();
           for (const g of grand.split('\n').filter(Boolean)) {
@@ -1683,6 +1689,27 @@ async function rehearse() {
     check('infra-filter', 'a watcher armed after removing its note is plumbing (the arm lanes really run, 11/04)', INFRA_PROCESS.test(wrapped('rm -f /x/spool/fable/1-gh-poll.txt && /x/weft/doorbell/inbox-watcher.sh fable')));
     check('infra-filter', 'a watcher after removing two notes with `;` is plumbing', INFRA_PROCESS.test(wrapped('rm /x/a.txt /x/b.txt; sh /x/bell-watcher.sh opus')));
     check('infra-filter', 'removing a whole tree before a watcher is work', !INFRA_PROCESS.test(wrapped('rm -rf dist && sh /x/bell-watcher.sh opus')));
+    // Second reader's cases (Sonnet, 11/04): each way the tool shell is told apart, and how else it can start.
+    const SNAP = `/bin/zsh -c source /x/.claude/shell-snapshots/s.sh 2>/dev/null || true && cd /x/discord-mcpl && npm test`;
+    check('infra-filter', 'a tool shell known only by its snapshot: its words are work', !INFRA_PROCESS.test(SNAP));
+    check('infra-filter', 'a tool shell known only by its eval: its words are work', !INFRA_PROCESS.test(`/bin/bash -c eval 'cd /x/discord-mcpl && npm test'`));
+    check('infra-filter', 'a tool shell with no snapshot step: its words are work', !INFRA_PROCESS.test(`/bin/bash -c cd /x/discord-mcpl && npm test && pwd -P >| /tmp/claude-x-cwd`));
+    check('infra-filter', 'a login tool shell: its words are work', !INFRA_PROCESS.test(`/bin/bash -c -l eval 'cd /x/discord-mcpl && npm test' < /dev/null && pwd -P >| /tmp/x`));
+    check('infra-filter', 'a watcher in a tool shell with no snapshot step is plumbing', INFRA_PROCESS.test(`/bin/bash -c eval 'sh /x/bell-watcher.sh opus' < /dev/null && pwd -P >| /tmp/x`));
+    check('infra-filter', 'under bwrap, the words in a tool shell are work', !INFRA_PROCESS.test(`bwrap --bind / / -- /bin/bash -c eval 'cd /x/discord-mcpl && npm test' < /dev/null && pwd -P >| /tmp/x`));
+    check('infra-filter', 'under sandbox-exec, the words in a tool shell are work', !INFRA_PROCESS.test(`env X=1 sandbox-exec -p (version 1) /bin/zsh -c eval 'cd /x/discord-mcpl && npm test' < /dev/null && pwd -P >| /tmp/x`));
+    check('infra-filter', 'under sandbox-exec, a watcher is still plumbing', INFRA_PROCESS.test(`env X=1 sandbox-exec -p (version 1) /bin/zsh -c eval 'sh /x/bell-watcher.sh opus' < /dev/null && pwd -P >| /tmp/x`));
+    check('infra-filter', 'real work before a heartbeat is work', !INFRA_PROCESS.test(wrapped('npm test; sleep 7200; echo "heartbeat: x"')));
+    check('infra-filter', 'a deferral names the work, not the shell around it', busyLabel(wrapped('cd /x/discord-mcpl && npm test')) === 'cd /x/discord-mcpl && npm test');
+    {
+      // The real path, with a real child: what the live daemon reads with pgrep and ps.
+      const child = spawn('/bin/sh', ['-c', `eval 'sleep 30' < /dev/null && pwd -P >| /dev/null`], { stdio: 'ignore', detached: true });
+      await new Promise((r) => setTimeout(r, 300));
+      const busy = io.busyChildren(process.pid);
+      process.kill(-child.pid, 'SIGKILL');
+      check('infra-filter', 'a deferral\'s alert (busy[0]) names the work inside a tool shell', busy[0] === 'sleep 30', JSON.stringify(busy));
+    }
+    check('infra-filter', 'a deferral names a process of its own by its line', busyLabel('node render.mjs --frames 0-8160') === 'node render.mjs --frames 0-8160');
     check('infra-filter', 'tests run from a path holding mcpl are work', !INFRA_PROCESS.test(wrapped('cd /Users/x/origin/discord-mcpl && npm test')));
     check('infra-filter', 'a build in a worktree holding bridge is work', !INFRA_PROCESS.test(wrapped('cd /Users/x/origin/mcpl-cc-bridge && bun run build')));
     check('infra-filter', 'a render whose file names a bridge is work', !INFRA_PROCESS.test(wrapped('node render.mjs --scene bridge')));
