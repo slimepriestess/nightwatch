@@ -49,8 +49,9 @@ const HOME = homedir();
 // spelling nightwatch#38 documents for other houses; `'"'"'` is how Claude Code wraps a single quote.
 //
 // Those words mean plumbing only on a process of its own: an MCP server, the bridge, caffeinate. Everything the agent
-// runs comes through its tool shell (`zsh -c source …shell-snapshots… && eval '…'`, seen in `ps`, under a sandbox's
-// bwrap or sandbox-exec when it has one, which is why the shell isn't anchored to the line's start), so there a word is
+// runs comes through its tool shell (`zsh -c source …shell-snapshots… && eval '…'`, seen in `ps`, sandboxed on macOS too;
+// Linux's sandbox runs it under bwrap, by Claude Code's source, unseen by us, so the shell isn't anchored to the line's
+// start), so there a word is
 // only a path or an argument: tests run in ~/origin/discord-mcpl aren't plumbing. In a tool shell, plumbing is the
 // heartbeat's shape above, or a watcher that IS the command, with no real work chained to it either way. A lane's
 // `rm <notes> && <watcher>` counts as one: the rm is done by the time it waits (247 of 992 real arms, 11/04). A
@@ -1696,9 +1697,20 @@ async function rehearse() {
     check('infra-filter', 'a tool shell with no snapshot step: its words are work', !INFRA_PROCESS.test(`/bin/bash -c cd /x/discord-mcpl && npm test && pwd -P >| /tmp/claude-x-cwd`));
     check('infra-filter', 'a login tool shell: its words are work', !INFRA_PROCESS.test(`/bin/bash -c -l eval 'cd /x/discord-mcpl && npm test' < /dev/null && pwd -P >| /tmp/x`));
     check('infra-filter', 'a watcher in a tool shell with no snapshot step is plumbing', INFRA_PROCESS.test(`/bin/bash -c eval 'sh /x/bell-watcher.sh opus' < /dev/null && pwd -P >| /tmp/x`));
+    // Linux's sandbox, as read from Claude Code's source: never seen in `ps` by us.
     check('infra-filter', 'under bwrap, the words in a tool shell are work', !INFRA_PROCESS.test(`bwrap --bind / / -- /bin/bash -c eval 'cd /x/discord-mcpl && npm test' < /dev/null && pwd -P >| /tmp/x`));
-    check('infra-filter', 'under sandbox-exec, the words in a tool shell are work', !INFRA_PROCESS.test(`env X=1 sandbox-exec -p (version 1) /bin/zsh -c eval 'cd /x/discord-mcpl && npm test' < /dev/null && pwd -P >| /tmp/x`));
-    check('infra-filter', 'under sandbox-exec, a watcher is still plumbing', INFRA_PROCESS.test(`env X=1 sandbox-exec -p (version 1) /bin/zsh -c eval 'sh /x/bell-watcher.sh opus' < /dev/null && pwd -P >| /tmp/x`));
+    // The real lines, from `ps` under headless Claude Code on macOS, sandbox off and on (Sonnet, 11/04), with only the home
+    // path changed. Sandboxed, sandbox-exec has exec'd the shell, so the line starts with the shell there too.
+    const realSetup = `{ \\builtin unalias -- 'which'; \\builtin unset -f -- 'which'; } >/dev/null 2>&1 || true && { \\builtin unalias -- 'unsetenv'; \\builtin unset -f -- 'unsetenv'; } >/dev/null 2>&1 || true`;
+    const realPlain = (c) => `/bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1793836982132-2yvjqp.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && ${realSetup} && eval '${c}' < /dev/null && pwd -P >| /tmp/claude-db9e-cwd`;
+    const realSandboxed = (c) => `/bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1793836990557-u9evpc.sh 2>/dev/null || true && export TMPDIR=/tmp/claude-501 && export GIT_CONFIG_PARAMETERS="\${GIT_CONFIG_PARAMETERS:+\${GIT_CONFIG_PARAMETERS} }'credential.http://127.0.0.1:51982.helper='" && setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL 2>/dev/null || true && ${realSetup} && eval '${c}' < /dev/null && pwd -P >| /tmp/claude-501/cwd-7401`;
+    for (const [name, line] of [['plain', realPlain], ['sandboxed', realSandboxed]]) {
+      const work = 'python3 -c "import time; time.sleep(40)" # mcplbridgemarker';
+      check('infra-filter', `the real ${name} line: its words are work`, !INFRA_PROCESS.test(line(work)));
+      check('infra-filter', `the real ${name} line: a deferral names the command`, busyLabel(line('npm test')) === 'npm test', busyLabel(line('npm test')));
+      check('infra-filter', `the real ${name} line: a watcher is plumbing`, INFRA_PROCESS.test(line('sh /x/machinery/bell-watcher.sh opus')));
+      check('infra-filter', `the real ${name} line: a heartbeat is plumbing`, INFRA_PROCESS.test(line('sleep 7200; echo heartbeat')));
+    }
     check('infra-filter', 'real work before a heartbeat is work', !INFRA_PROCESS.test(wrapped('npm test; sleep 7200; echo "heartbeat: x"')));
     check('infra-filter', 'a deferral names the work, not the shell around it', busyLabel(wrapped('cd /x/discord-mcpl && npm test')) === 'cd /x/discord-mcpl && npm test');
     {
