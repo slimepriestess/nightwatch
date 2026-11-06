@@ -96,14 +96,24 @@ if [ -n "$DUE" ]; then
   [ -n "$WAITING" ] && { echo "due notes already waiting here, for your next seam (they don't wake this watcher):"; echo "$WAITING" | sed "s|^|  $DUE/|"; }
 fi
 while :; do
-  NOTE="$(ls "$SPOOL" 2>/dev/null | head -1)"
-  if [ -n "$NOTE" ]; then
-    echo "BELL — read the note, run what it says, delete the file, re-arm the watcher:"
-    echo "--- $SPOOL/$NOTE"
-    cat "$SPOOL/$NOTE"
-    due_tail
-    exit 0
-  fi
+  # Only completed notes count: pollers and the nightshift stage a note as
+  # a temp name and rename it into place, so a half-written file must never
+  # ring (11/04, 11/05: the watcher listed a poller's name.txt.tmp, lost the
+  # cat to the rename, and exited 1 — a false bell delivering an error).
+  # A read that fails (renamed away, deleted by a peer, or not a plain
+  # readable file) skips to the next candidate; an empty file is a write
+  # still in flight from a direct writer, left for a later tick. Spool
+  # names are machine-stamped (no spaces), as the whole hub assumes.
+  for NOTE in $(ls "$SPOOL" 2>/dev/null | grep '\.txt$'); do
+    [ -s "$SPOOL/$NOTE" ] || continue
+    if BODY="$(cat "$SPOOL/$NOTE" 2>/dev/null)"; then
+      echo "BELL — read the note, run what it says, delete the file, re-arm the watcher:"
+      echo "--- $SPOOL/$NOTE"
+      printf '%s\n' "$BODY"
+      due_tail
+      exit 0
+    fi
+  done
   if [ -n "$ARM_MARK" ]; then
     FRESH="$(find "$DUE" -maxdepth 1 -name '*.txt' -newer "$ARM_MARK" 2>/dev/null | sort | head -1)"
     if [ -n "$FRESH" ]; then
