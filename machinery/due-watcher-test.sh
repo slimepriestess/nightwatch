@@ -106,5 +106,18 @@ check "and the next real note still rings" "$(alive "$W9")" "gone"
 check "with its text" "$(grep -c 'the real note' "$T/w9.out")" "1"
 rm -f "$SPOOL/9500-note.txt"
 
+# 10. A zero-byte .txt (a direct writer's note still in flight) is left
+# for a later tick, then rings once it has content.
+arm "$T/wA.out"; WA=$ARMED; WPIDS="$WPIDS $WA"; wait_up "$T/wA.out"
+: > "$SPOOL/9800-empty.txt"
+sleep 7
+TEN_ALIVE="$(alive "$WA")"
+echo "now complete" >> "$SPOOL/9800-empty.txt"
+sleep 7
+check "a zero-byte note doesn't wake the watcher" "$TEN_ALIVE" "alive"
+check "and rings once it has content" "$(alive "$WA")" "gone"
+check "with the body" "$(grep -c 'now complete' "$T/wA.out")" "1"
+rm -f "$SPOOL/9800-empty.txt"
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
