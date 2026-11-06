@@ -23,7 +23,7 @@
  *    (CLAUDE_CODE_SESSION_ID via `ps eww`), never guessed from timing.
  */
 import { laneWatchers, processTable, unheardBell } from './watchers.mjs';
-import { readFileSync, readdirSync, statSync, existsSync, appendFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, appendFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { platformKind, summonWindow, withToolPath } from './platform.mjs';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -372,7 +372,11 @@ function ringBell(lane, sessionId, source, midday) {
   try {
     const spool = join(CFG.paths.spool, lane);
     mkdirSync(spool, { recursive: true });
-    writeFileSync(join(spool, `${Date.now()}-bell-${lane}.txt`), ritual + '\n');
+    // Staged like watch.mjs's due notes: a dotfile, then an atomic rename,
+    // so a reader never sees a bell note mid-write.
+    const bellName = `${Date.now()}-bell-${lane}.txt`;
+    writeFileSync(join(spool, `.${bellName}.tmp`), ritual + '\n');
+    renameSync(join(spool, `.${bellName}.tmp`), join(spool, bellName));
     log(`rang the sleep-bell for ${lane} (session ${sessionId.slice(0, 8)}…) — spool note written`);
     emitEvent('bell-rung', { lane, session: sessionId, ...(source ? { source } : {}), ...(midday ? { midday: midday.tier } : {}) });
     // Is anyone listening (10/16)? Checked here, at the bell, and nowhere else:
