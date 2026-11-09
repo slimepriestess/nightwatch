@@ -72,5 +72,52 @@ sleep 7
 check "a staged due note isn't picked before its rename" "$(alive "$W6")" "alive"
 rm -f "$DUE/.6000-watch-segment-due.txt.tmp"
 
+# 7. A poller's staged file in the SPOOL (name.txt.tmp, how doorbell pollers
+# stage before their atomic rename) is not a note: the watcher neither rings
+# on it nor dies cat-ing a name the rename already took (the 11/04 and 11/05
+# specimens: "cat: ...portal-channel.txt.tmp: No such file or directory",
+# exit 1 — a false bell delivering an error instead of a note).
+arm "$T/w7.out"; W7=$ARMED; WPIDS="$WPIDS $W7"; wait_up "$T/w7.out"
+printf 'half-written poller note\n' > "$SPOOL/7000-portal-channel.txt.tmp"
+sleep 7
+check "a staged spool file (.txt.tmp) doesn't wake the watcher" "$(alive "$W7")" "alive"
+check "and is never printed as a bell" "$(grep -c 'half-written' "$T/w7.out")" "0"
+
+# 8. The rename lands: the completed note rings, whole, while the watcher
+# from case 7 is still armed — the full atomic-writer handshake.
+mv "$SPOOL/7000-portal-channel.txt.tmp" "$SPOOL/7000-portal-channel.txt"
+sleep 7
+check "the renamed note wakes that same watcher" "$(alive "$W7")" "gone"
+check "and prints whole" "$(grep -c 'half-written poller note' "$T/w7.out")" "1"
+rm -f "$SPOOL/7000-portal-channel.txt"
+
+# 9. A note that vanishes between the listing and the read (a peer session
+# deleting it, or a stray file removed) is not a death: the watcher survives
+# the miss and rings on the next real note.
+arm "$T/w9.out"; W9=$ARMED; WPIDS="$WPIDS $W9"; wait_up "$T/w9.out"
+mkdir "$SPOOL/9000-unreadable.txt" 2>/dev/null   # cat on a directory fails like a vanished file
+sleep 7
+NINE_ALIVE="$(alive "$W9")"
+rmdir "$SPOOL/9000-unreadable.txt"
+echo "the real note" > "$SPOOL/9500-note.txt"
+sleep 7
+check "an unreadable spool entry doesn't kill the watcher" "$NINE_ALIVE" "alive"
+check "and the next real note still rings" "$(alive "$W9")" "gone"
+check "with its text" "$(grep -c 'the real note' "$T/w9.out")" "1"
+rm -f "$SPOOL/9500-note.txt"
+
+# 10. A zero-byte .txt (a direct writer's note still in flight) is left
+# for a later tick, then rings once it has content.
+arm "$T/wA.out"; WA=$ARMED; WPIDS="$WPIDS $WA"; wait_up "$T/wA.out"
+: > "$SPOOL/9800-empty.txt"
+sleep 7
+TEN_ALIVE="$(alive "$WA")"
+echo "now complete" >> "$SPOOL/9800-empty.txt"
+sleep 7
+check "a zero-byte note doesn't wake the watcher" "$TEN_ALIVE" "alive"
+check "and rings once it has content" "$(alive "$WA")" "gone"
+check "with the body" "$(grep -c 'now complete' "$T/wA.out")" "1"
+rm -f "$SPOOL/9800-empty.txt"
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
