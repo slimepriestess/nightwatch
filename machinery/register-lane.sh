@@ -39,8 +39,17 @@ if [ -n "$NW_CFG" ]; then
 else
   REG="$SELF_DIR"
 fi
-# Prune stale entries so the registry never grows unboundedly.
-find "$REG" -maxdepth 1 -name 'lane.*' -mtime +7 -delete 2>/dev/null
+# Prune stale entries so the registry never grows unboundedly, but never a
+# running session's: this runs on every SessionStart in the hub, and a lane
+# with no nightly fold (midday only) can run one session for longer than a
+# week, so an entry stays while its recorded claude is alive (#69).
+for f in "$REG"/lane.*; do
+  [ -f "$f" ] || continue
+  [ -n "$(find "$f" -mtime +7 2>/dev/null)" ] || continue
+  pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$f")
+  if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q claude; then continue; fi
+  rm -f "$f"
+done
 [ -z "$NW_LANE" ] && exit 0
 SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
