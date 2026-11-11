@@ -2018,7 +2018,10 @@ if (process.argv.includes('--preflight')) {
   };
   const lanes = armedLanes();
   console.log(`config file: ${CFG.__configFile ?? '(defaults)'}`);
-  console.log(`armed file parses as: [${lanes.join(', ') || 'DISARMED'}] (raw: ${JSON.stringify(readFileSync(ARMED_FILE, 'utf8').slice(0, 60))})`);
+  // A hub with nights off has no armed file, which armedLanes() reads as disarmed (#68).
+  let raw;
+  try { raw = JSON.stringify(readFileSync(ARMED_FILE, 'utf8').slice(0, 60)); } catch (e) { if (e.code !== 'ENOENT') throw e; raw = '(no file)'; }
+  console.log(`armed file parses as: [${lanes.join(', ') || 'DISARMED'}] (raw: ${raw})`);
   console.log(`window: sleep ${SLEEP_HOUR} wake ${WAKE_HOUR} (${CFG.timezone}); now minute ${nowMin()}`);
   for (const lane of lanes) {
     const nw = join(WAKECYCLE, `next-wake.${lane}.json`);
