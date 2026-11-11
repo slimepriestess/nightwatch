@@ -41,6 +41,9 @@ try {
   // longer than a week between folds). A stand-in for that session's claude:
   // a process whose command reads "claude".
   const live = spawn('sleep', ['60'], { argv0: 'claude', stdio: 'ignore' });
+  // Some other program now at a recorded pid: a plain sleep, whose command
+  // line names no claude wherever the checkout sits.
+  const other = spawn('sleep', ['60'], { stdio: 'ignore' });
   try {
     const old = (sid, pid) => {
       const f = join(hub, 'wakecycle', `lane.${sid}`);
@@ -49,7 +52,7 @@ try {
     };
     old('sid-live', live.pid);
     old('sid-dead', 999999);
-    old('sid-notclaude', process.pid);
+    old('sid-notclaude', other.pid);
     run({ NIGHTWATCH_CONFIG: cfg }, 'sid-plain'); // an unlaned session opened in the hub runs the prune
     check('a week-old entry whose claude is still running is kept (#69)', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-live'))));
     check('a week-old entry whose process is gone is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-dead'))));
@@ -57,6 +60,7 @@ try {
     check('a fresh entry is kept', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-new'))));
   } finally {
     live.kill();
+    other.kill();
   }
 } finally {
   rmSync(hub, { recursive: true, force: true });
