@@ -339,6 +339,20 @@ try {
     check('13c the damaged session\'s grown transcript is still caught up', same(join(h.transcripts, `${A}.jsonl`), join(h.archive, `${A}.jsonl`)), r.err);
     check('13c the sweep\'s error is said, not a COULD NOT CATCH UP', /COULD NOT COPY subagent subagents\/ \(archive\) of aaaaaaaa/.test(r.err) && !/COULD NOT CATCH UP aaaaaaaa/.test(r.err), r.err);
   }
+  // 13d/13e (the 10/29 review): the same damaged folder when nothing has
+  // grown, the path that rings on every later fold, and when the source
+  // transcript is gone too. Both rows must still carry the sweep's error.
+  for (const [name, gone] of [['13d', false], ['13e', true]]) {
+    const h = hub();
+    transcript(h, A, 6); sleep(h, A);
+    mkdirSync(join(h.archive, A), { recursive: true });
+    writeFileSync(join(h.archive, A, 'subagents'), 'not a folder\n');
+    if (gone) rmSync(join(h.transcripts, `${A}.jsonl`), { force: true });
+    transcript(h, B, 4);
+    const r = sleep(h, B);
+    check(`${name} a fold beside a damaged archive folder${gone ? ' whose source is gone' : ', nothing grown,'} succeeds`, r.code === 0, r.err);
+    check(`${name} the sweep's error is still said`, /COULD NOT COPY subagent subagents\/ \(archive\) of aaaaaaaa/.test(r.err), r.err);
+  }
 } finally {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
 }
