@@ -401,13 +401,14 @@ check('realIo: a missing wake-costs file reads as empty', () => {
 // window's shell would do. On macOS that is an interactive login zsh, so a throwaway ZDOTDIR/.zshrc puts the
 // stub dir first on PATH; on Linux and WSL the lookup prefixes the configured claude's own directory, so the
 // stub sits there. Either way the stub is not on the child's PATH, so only the fall-through can find it.
-function preflightLines(wakeCostsText, claudeBinOk = true, { fallThrough = false, omit = [], installDir } = {}) {
+function preflightLines(wakeCostsText, claudeBinOk = true, { fallThrough = false, omit = [], installDir, armed = '' } = {}) {
   const hub = mkdtempSync(join(tmpdir(), 'nw-vc-hub-'));
   try {
     for (const d of ['wakecycle', 'ladder', 'projects', 'sessions']) mkdirSync(join(hub, d), { recursive: true });
     const s = stub('claude-hub', `case "$1" in --help) cat <<'NW_HELP_EOF'\n${HELP(omit)}NW_HELP_EOF\n;; *) echo "2.1.310 (Claude Code)";; esac`);
     writeFileSync(join(hub, 'checkpoint.md'), '# checkpoint\n');
-    writeFileSync(join(hub, 'wakecycle', 'nightshift.armed'), ''); // preflight reads it unguarded; empty = disarmed
+    // armed: the armed file's text; null leaves it out, as a hub with nights off has none (#68).
+    if (armed !== null) writeFileSync(join(hub, 'wakecycle', 'nightshift.armed'), armed);
     writeFileSync(join(hub, 'ladder', 'wake-costs.jsonl'), wakeCostsText);
     let claudeBin = claudeBinOk ? s : join(hub, 'no-such-claude'); let found = null; const extraEnv = {};
     // On linux and wsl the lookup puts node's own directory first, as the window's PATH does, so a claude installed
@@ -442,6 +443,12 @@ check('preflight carries the check: an unseen version is amber and the stub path
   assert.equal(r.code, 0, r.err);
   const l = r.lines.find((x) => /^\w+\s+claude /.test(x)); assert.ok(l, r.lines.join('\n'));
   assert.match(l, /^WARN/); assert.match(l, /claude-hub \(via paths\.claudeBin\)/); assert.match(l, /woken: 2\.1\.309/);
+  assert.ok(r.lines.some((x) => /preflight complete/.test(x)), 'the rest of the preflight still runs');
+});
+check('preflight runs on a hub with no armed file, as a nights-off hub has none, and says so (#68)', () => {
+  const r = preflightLines(rows('2.1.310'), true, { armed: null });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.lines.some((x) => /armed file parses as: \[DISARMED\] \(raw: \(no file\)\)/.test(x)), r.lines.join('\n'));
   assert.ok(r.lines.some((x) => /preflight complete/.test(x)), 'the rest of the preflight still runs');
 });
 check('preflight carries the flag check: a --help that lists them is ok, naming the stub; one missing a flag is amber and names it', () => {
