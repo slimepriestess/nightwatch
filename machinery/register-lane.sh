@@ -43,9 +43,8 @@ fi
 # running session's: this runs on every SessionStart in the hub, and a lane
 # with no nightly fold (midday only) can run one session for longer than a
 # week, so an entry stays while its recorded claude is alive (#69).
-for f in "$REG"/lane.*; do
-  [ -f "$f" ] || continue
-  [ -n "$(find "$f" -mtime +7 2>/dev/null)" ] || continue
+# One find for the week-old entries, not one per entry: this runs at every start.
+find "$REG" -maxdepth 1 -type f -name 'lane.*' -mtime +7 2>/dev/null | while IFS= read -r f; do
   pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$f")
   if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q claude; then continue; fi
   rm -f "$f"
