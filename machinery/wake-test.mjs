@@ -228,7 +228,7 @@ check('config.mjs set writes lanes.<name>.wakePrompt as text and refuses a numbe
     assert.equal(ok.status, 0, ok.stderr);
     assert.equal(JSON.parse(readFileSync(cfgFile, 'utf8')).lanes.main.wakePrompt, '[nightwatch] woken: arm your watcher');
     const no = cli('set', 'lanes.main.wakePrompt', '42');
-    assert.equal(no.status, 1); assert.match(no.stderr, /takes a string/);
+    assert.equal(no.status, 1); assert.match(no.stderr, /not text/); // the set verb now speaks wakePromptProblem's words (one implementation for all four writers)
     assert.equal(JSON.parse(readFileSync(cfgFile, 'utf8')).lanes.main.wakePrompt, '[nightwatch] woken: arm your watcher', 'a refused set wrote anyway');
   } finally { rmSync(hub, { recursive: true, force: true }); }
 });
