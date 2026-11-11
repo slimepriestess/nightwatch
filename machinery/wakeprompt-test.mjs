@@ -46,6 +46,11 @@ try {
     assert.equal(typeof v, 'string');
     assert.equal(v, DEFAULT_WAKE_PROMPT);
   });
+  check("Set up's receipt carries firstWake AND created, so the wake-side skip has its marker (pins the writer: wake-test builds its receipts by hand)", () => {
+    const r = JSON.parse(readFileSync(join(hub, 'wakecycle', 'next-wake.alpha.json'), 'utf8'));
+    assert.equal(r.firstWake, true);
+    assert.equal(r.created, true);
+  });
   check('the default itself passes wake.sh\'s own refusal rules (machine-voiced, not a flag, not a bare word)', () => {
     assert.match(DEFAULT_WAKE_PROMPT, /^\[nightwatch\]/);
     assert.equal(wakePromptProblem(DEFAULT_WAKE_PROMPT), null);
