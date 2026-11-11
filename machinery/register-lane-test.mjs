@@ -59,6 +59,36 @@ try {
     });
   }
 
+  // Two lines of the walk-up Sonnet's second read found unpinned. A wrapper
+  // whose own executable sits under a claude-named folder isn't claude: only
+  // an executable named claude is. And with no claude within reach the entry
+  // records the hook's $PPID, which is what keeps it right where ps's first
+  // word can't name claude (a home folder with a space in it).
+  {
+    const hook = join(HERE, 'register-lane.sh');
+    const e = { ...process.env, NIGHTWATCH_CONFIG: cfg, NIGHTWATCH_LANE: 'alpha' };
+    for (const k of ['WEFT_CONFIG', 'WEFT_LANE']) delete e[k];
+    const inputFor = (sid) => { const f = join(hub, `input-${sid}.json`); writeFileSync(f, JSON.stringify({ session_id: sid })); return f; };
+    const runner = join(hub, '.claude', 'hooks', 'run');
+    const code = `const { execFileSync } = require('node:child_process');
+      execFileSync('sh', ['-c', 'sh "$0" < "$1"; true', ${JSON.stringify(hook)}, process.argv[1]], { stdio: 'ignore', argv0: ${JSON.stringify(runner)} });
+      process.stdout.write(String(process.pid));`;
+    const r = spawnSync(process.execPath, ['-e', code, inputFor('sid-runner')], { argv0: 'claude', env: e, encoding: 'utf8' });
+    check('a wrapper whose own path is under a claude-named folder is passed over for the claude above it', () => {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(entry('sid-runner').pid, Number(r.stdout));
+    });
+    // Nine shells between the hook and anything above it put any claude past
+    // the walk's reach; the innermost one, the hook's parent, writes its pid.
+    const chain = join(hub, 'chain.sh');
+    const pidFile = join(hub, 'innermost.pid');
+    writeFileSync(chain, `if [ "$1" -gt 0 ]; then sh "$0" $(($1 - 1)) "$2" "$3"; true; else echo $$ > ${JSON.stringify(pidFile)}; sh ${JSON.stringify(hook)} < "$2"; true; fi\n`);
+    execFileSync('sh', [chain, '8', inputFor('sid-noclaude'), 'x'], { env: e, stdio: 'ignore' });
+    check('with no claude in reach, the entry records the hook\'s parent', () => {
+      assert.equal(entry('sid-noclaude').pid, Number(readFileSync(pidFile, 'utf8').trim()));
+    });
+  }
+
   // #69: the week-old prune runs on every SessionStart, so it must not take
   // the entry of a session that is still running (a midday-only lane can live
   // longer than a week between folds). A stand-in for that session's claude:
