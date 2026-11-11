@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { configEnv, contextOfEntries, loadConfig, reloadConfig, switchboardLane } from './config.mjs';
 import { cannotAnswer } from './deadwake.mjs';
-import { claudeVersionLines, flagLines, nodeLines, nodeRealIo, realIo as claudeVersionIo } from './versioncheck.mjs';
+import { claudeVersionLines, flagLines, nodeLines, nodeRealIo, realIo as claudeVersionIo, wakePromptLines } from './versioncheck.mjs';
 
 const HOME = homedir();
 
@@ -2031,7 +2031,7 @@ if (process.argv.includes('--preflight')) {
   // Added 10/25 (lines only; the frozen vocabulary above stays): the version wake.sh
   // would run, against the versions that have woken on a folded tail. Amber, never red.
   const claudeIo = claudeVersionIo({ claudeBin: CFG.paths.claudeBin, wakeCostsPath: CFG.paths.wakeCosts });
-  for (const line of [...claudeVersionLines(claudeIo), ...flagLines(claudeIo), ...nodeLines(nodeRealIo({ machineryDir: MACHINERY_DIR }))]) console.log(line);
+  for (const line of [...claudeVersionLines(claudeIo), ...flagLines(claudeIo), ...nodeLines(nodeRealIo({ machineryDir: MACHINERY_DIR })), ...wakePromptLines(CFG)]) console.log(line);
   tickWith(preflightIo);
   console.log('preflight complete — nothing was touched.');
   process.exit(0);

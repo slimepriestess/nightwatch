@@ -214,8 +214,12 @@ it comes back at the next login.
 - `models.bell` — the model used for spool-note bell passes.
 - `lanes.<name>.wakePrompt` — a first prompt for the woken session,
   e.g. `"[nightwatch] woken at 10:00: arm your watcher, then read the
-  receipts"`. Unset, a woken session waits at the input until someone
-  types, and hears no mail until then. Keep it machine-voiced: it's the
+  receipts"`. Lanes created by Set up / Add agent get a sensible
+  default, so mornings run without a human from day one; edit the text
+  to taste, or remove the field (spec `wakePrompt: null` at creation)
+  if you want the old behavior. Unset, a woken session waits at the
+  input until someone types, and hears no mail until then — the
+  preflight warns about such lanes. Keep it machine-voiced: it's the
   harness talking, not you or the agent. It's claude's first positional
   argument, so wake.sh skips (and logs) text that isn't a string, starts
   with "-" (a flag), or is a single bare word (claude could run it as a

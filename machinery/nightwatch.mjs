@@ -30,6 +30,7 @@ import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { daemonJob, registryFile, summonArgvFor, withToolPath } from './platform.mjs';
+import { DEFAULT_WAKE_PROMPT, wakePromptProblem } from './versioncheck.mjs';
 import { configEnv, machineZone } from './config.mjs';
 import { applyRetention, stepFor, survey } from './retention.mjs';
 
@@ -39,6 +40,9 @@ const HOME = homedir();
 function die(sentence, code = 1) { process.stderr.write(sentence.trim() + '\n'); process.exit(code); }
 function out(x) { process.stdout.write((typeof x === 'string' ? x : JSON.stringify(x)) + '\n'); }
 const expand = (p) => p.startsWith('~') ? join(HOME, p.slice(1)) : resolve(p);
+// A created lane wakes self-propelled unless the spec opts out (null) or
+// brings its own text; absent = the default (the dark-Saturday fix, 10/31).
+const wakePromptField = (lane) => lane.wakePrompt === null ? {} : { wakePrompt: lane.wakePrompt ?? DEFAULT_WAKE_PROMPT };
 
 // ---------------------------------------------------------------- templates
 function fillWelcome(ctx) {
@@ -88,6 +92,13 @@ function loadSpec(path) {
   if (!lane.id || !/^[a-z][a-z0-9-]*$/.test(lane.id)) die('The agent needs an id: lowercase letters, digits and dashes, starting with a letter.');
   if (!lane.model || typeof lane.model !== 'string') die('The agent needs a model id (e.g. claude-opus-5-5).');
   if (lane.targetTokens !== undefined && (typeof lane.targetTokens !== 'number' || lane.targetTokens < 1000)) die('targetTokens must be a number of tokens (e.g. 250000).');
+  // Checked at creation, where a human is still in the loop, rather than left
+  // for wake.sh's 08:00 refusal log (a bad optional knob must not cost a
+  // morning when a person could have heard about it at the confirm).
+  if (lane.wakePrompt !== undefined && lane.wakePrompt !== null) {
+    const why = wakePromptProblem(lane.wakePrompt);
+    if (why) die(`lane.wakePrompt would be refused at wake: ${why}. Give it machine-voiced text (e.g. "[nightwatch] arm your watcher, then read the receipts"), or null for no prompt.`);
+  }
   const fs = lane.firstSession ?? { kind: 'fresh' };
   if (fs.kind !== 'fresh' && fs.kind !== 'adopt') die('firstSession.kind must be "fresh" or "adopt".');
   if (fs.kind === 'adopt' && !fs.sessionId) die('Adopting a session needs its sessionId.');
@@ -215,7 +226,7 @@ function initSteps(spec) {
         // No switchboard flag: that's Weft's Discord-routing concept, and
         // switchboardLane() falls back to defaultLane anyway — identical
         // behavior with no implied infrastructure (opus's bench nit, 10/7).
-        lanes: { [lane.id]: { targetTokens: target, model: lane.model, ...(lane.armed === false ? {} : {}) } },
+        lanes: { [lane.id]: { targetTokens: target, model: lane.model, ...wakePromptField(lane) } },
         machineryVersion,
         // this machine's zone, pinned: the night stays put if the laptop travels (config.mjs machineZone)
         timezone: machineZone(),
@@ -351,7 +362,7 @@ function laneAddSteps(spec) {
   const claimStep = {
     verb: 'Add', what: `agent "${lane.id}" to ${ctx.name ?? 'the persona'}`, detail: `${lane.model}, ${spec.lane.schedule ? 'their own schedule' : 'the global schedule'}, ${Math.round(target / 1000)}k${lane.armed === false ? ', not armed' : ''}`,
     run() {
-      cfg.lanes[lane.id] = { targetTokens: target, model: lane.model, ...(spec.lane.schedule ? { schedule: spec.lane.schedule } : {}) };
+      cfg.lanes[lane.id] = { targetTokens: target, model: lane.model, ...wakePromptField(lane), ...(spec.lane.schedule ? { schedule: spec.lane.schedule } : {}) };
       writeFileSync(cfgPath + '.tmp', JSON.stringify(cfg, null, 2) + '\n');
       renameSync(cfgPath + '.tmp', cfgPath);
       if (lane.armed !== false) {
