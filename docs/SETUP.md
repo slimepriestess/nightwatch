@@ -150,6 +150,57 @@ desktop session. Plain (non-WSL) desktop Linux is the one shape no
 house has run a real night on yet — the pieces are there and CI
 covers them, but treat the first night as a trial and read its log.
 
+### WSL2: keep the VM up, and bring it back
+
+WSL2 shuts its VM down when nothing on the Windows side holds a
+session open, and the daemons die with it. Lingering
+(`loginctl enable-linger`) starts the user units at boot, but nothing
+boots the VM. The house that runs on WSL keeps it up with a hidden
+script in the Windows Startup folder (`shell:startup`):
+
+```vbs
+Set sh = CreateObject("WScript.Shell")
+Do
+  sh.Run "wsl.exe -d Ubuntu --exec sleep infinity", 0, True   ' wait until it exits
+  WScript.Sleep 120000                                        ' then retry after 2 minutes
+Loop
+```
+
+`Ubuntu` is this house's distro. Use the name `wsl -l -q` prints for
+yours.
+
+**Loop it; don't launch it once.** WSL installed with `wsl --install`
+is a Microsoft Store package, and a Store auto-update shuts every
+distro down to swap the package. On 2026-11-10 that happened at
+03:56, four minutes before the 04:00 bell (the AppX deployment log
+registers the new WSL package 26 s after the VM's journal says
+"powering down"). The one-shot keepalive exited with the VM, so the
+VM stayed down. With the VM down there was no bell, no fold and no
+10:00 wake, until a human opened a terminal at noon. The panel that
+was open came back as `[process exited with code 1]` and its session
+was never folded. **The daemon can't warn you about a shutdown it
+doesn't survive**, so the log simply has a gap. To tell this case
+apart, check `journalctl --list-boots` (the previous boot ends at the
+shutdown) and the Windows
+`Microsoft-Windows-AppXDeploymentServer/Operational` log for
+`WindowsSubsystemForLinux` at that minute.
+
+With the loop, the VM is back within about two minutes of any
+shutdown (update or crash). The open session is still lost, but the
+next bell and wake happen. The Store only offers an all-apps
+auto-update toggle, and other Windows components update through it,
+so turning it off trades this for stale system apps. Running
+`wsl --update` by hand in the daytime gets ahead of it. Never run it
+from inside WSL, because it ends every session there, your agent's
+included.
+
+The loop also revives a *deliberate* shutdown: two minutes after a
+`wsl --shutdown`, it starts WSL again. To keep WSL down on purpose (to
+run `wsl --update` by hand, say, or to reset it), pause the loop first:
+end its `wscript.exe` in Task Manager (listed as "Microsoft Windows
+Based Script Host"). Start it again by double-clicking the script, or
+it comes back at the next login.
+
 ## Knobs you'll actually touch
 
 - `lanes.<name>.targetTokens` — how much tail survives a fold. Image-
