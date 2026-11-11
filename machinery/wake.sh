@@ -259,7 +259,21 @@ set -- --append-system-prompt-file "$HEAD" --system-prompt-snapshot off
 # session (Opus's read of claude --help). Those are refused: logged, and the
 # wake goes on without a prompt, because a bad optional knob must not cost the
 # morning.
-WAKE_PROMPT="$("$NODE" -e '
+if [ -n "$FIRSTWAKE" ]; then
+  # A FIRST wake never takes the prompt (Ra's ruling, 11/11): creation is
+  # human-confirmed by nightwatch.mjs's own invariant, so a first wake is
+  # never an unattended morning — the porch and welcome text own the first
+  # turn, the wakePrompt owns every scheduled morning after. Logged when one
+  # was configured, so a keeper wondering where their prompt went finds the
+  # answer here.
+  "$NODE" -e '
+import(process.argv[1]).then((m) => {
+  const v = m.loadConfig().lanes?.[process.argv[2]]?.wakePrompt;
+  if (v !== undefined && v !== "") process.exitCode = 9;
+});' "file://$WAKECYCLE_DIR/config.mjs" "$LANE" 2>/dev/null
+  [ $? -eq 9 ] && echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: first wake — wakePrompt not passed (the porch and welcome own the first turn; the prompt runs from the next scheduled wake)" >> "$WEFT_LOG"
+else
+  WAKE_PROMPT="$("$NODE" -e '
 import(process.argv[1]).then((m) => {
   const v = m.loadConfig().lanes?.[process.argv[2]]?.wakePrompt;
   if (v === undefined || v === "") return;
@@ -270,11 +284,12 @@ import(process.argv[1]).then((m) => {
   const why = m.wakePromptProblem(v);
   if (why) { console.log(`REFUSED ${why}`); process.exitCode = 3; } else process.stdout.write(v);
 });' "file://$WAKECYCLE_DIR/config.mjs" "$LANE" 2>/dev/null)"
-case $? in
-  0) [ -n "$WAKE_PROMPT" ] && set -- "$@" "$WAKE_PROMPT" ;;
-  3) echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: lanes.$LANE.wakePrompt ignored (${WAKE_PROMPT#REFUSED }); waking without a prompt" >> "$WEFT_LOG" ;;
-  *) echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: couldn't read lanes.$LANE.wakePrompt; waking without a prompt" >> "$WEFT_LOG" ;;
-esac
+  case $? in
+    0) [ -n "$WAKE_PROMPT" ] && set -- "$@" "$WAKE_PROMPT" ;;
+    3) echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: lanes.$LANE.wakePrompt ignored (${WAKE_PROMPT#REFUSED }); waking without a prompt" >> "$WEFT_LOG" ;;
+    *) echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: couldn't read lanes.$LANE.wakePrompt; waking without a prompt" >> "$WEFT_LOG" ;;
+  esac
+fi
 # Insurance hatch until the waited child is proven against REAL interactive
 # claude (the bench's claude is a stub): WEFT_WAKE_EXEC=1 restores the old
 # exec launch — no stderr capture, no model-death discrimination.

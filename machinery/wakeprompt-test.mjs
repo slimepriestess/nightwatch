@@ -97,6 +97,23 @@ try {
     assert.equal(lanes().alpha.wakePrompt, '[nightwatch] a healthy morning text');
   });
 
+  // --- the confirm screen names the prompt (plan is the preview the person
+  // confirms, so the disclosure lives or dies there) ----------------------
+  const plan = (o, cfg) => {
+    const env = { ...process.env, WEFT_NW_NO_ACTIVATE: '1' };
+    delete env.WEFT_CONFIG; delete env.NIGHTWATCH_CONFIG;
+    if (cfg) env.WEFT_CONFIG = cfg;
+    return JSON.parse(execFileSync(process.execPath, [join(HERE, 'nightwatch.mjs'), 'plan', spec(o)], { encoding: 'utf8', env }));
+  };
+  const planDetail = (laneExtra) => plan({ op: 'lane-add', lane: { id: 'pv', model: 'claude-haiku-5-5', firstSession: { kind: 'fresh' }, ...laneExtra } }, hubCfg)
+    .steps.map((s) => s.detail ?? '').join(' | ');
+  check('the confirm screen says "the default wake prompt" when the default applies', () =>
+    assert.match(planDetail({}), /the default wake prompt/));
+  check('the confirm screen says "their own wake prompt" for spec-provided text', () =>
+    assert.match(planDetail({ wakePrompt: '[nightwatch] custom text here' }), /their own wake prompt/));
+  check('the confirm screen says "no wake prompt" on opt-out', () =>
+    assert.match(planDetail({ wakePrompt: null }), /no wake prompt/));
+
   // --- the Doctor/preflight lines ----------------------------------------
   check('wakePromptLines warns, amber-voiced, on a lane with no prompt', () => {
     const ls = wakePromptLines({ lanes: { quiet: { model: 'claude-fable-5' } } });

@@ -359,12 +359,6 @@ export function laneConfig(cfg, lane) {
   return { targetTokens: 250_000, switchboard: false, ...lc };
 }
 
-// ------------------------------------------------------------- set / unset
-// The app's save buttons call these (Nightwatch write side, 10/6): edits go
-// to the CONFIG FILE (the overrides), never the resolved config. Atomic
-// (tmp + rename), whitelisted key paths, per-key type checks, and the
-// loader's own consistency rules re-checked on the RESULT before a byte
-// lands — a config this machinery can't boot from must be unwritable.
 /**
  * Why wake.sh would refuse this wakePrompt, or null if it is fine. THE one
  * implementation: wake.sh's inline snippet, creation (nightwatch.mjs), the
@@ -379,6 +373,12 @@ export function wakePromptProblem(v) {
   return null;
 }
 
+// ------------------------------------------------------------- set / unset
+// The app's save buttons call these (Nightwatch write side, 10/6): edits go
+// to the CONFIG FILE (the overrides), never the resolved config. Atomic
+// (tmp + rename), whitelisted key paths, per-key type checks, and the
+// loader's own consistency rules re-checked on the RESULT before a byte
+// lands — a config this machinery can't boot from must be unwritable.
 const LANE_KEYS = {
   targetTokens: 'number', emergencyTargetTokens: 'number', contextWindow: 'number',
   switchboard: 'boolean', cwdMarker: 'string', runtime: 'string', modelName: 'string',
