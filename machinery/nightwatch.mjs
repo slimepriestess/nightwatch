@@ -214,7 +214,7 @@ function initSteps(spec) {
     },
   });
   steps.push({
-    verb: 'Write', what: 'nightwatch.config.json', detail: `persona ${ctx.name ?? '(unnamed)'}, 1 agent (${lane.model}), ${sleep} → ${wake}, ${Math.round(target / 1000)}k`,
+    verb: 'Write', what: 'nightwatch.config.json', detail: `persona ${ctx.name ?? '(unnamed)'}, 1 agent (${lane.model}), ${sleep} → ${wake}, ${Math.round(target / 1000)}k, ${lane.wakePrompt === null ? 'no wake prompt' : lane.wakePrompt ? 'their own wake prompt' : 'the default wake prompt'}`,
     run() {
       let machineryVersion = 'unstamped';
       try { machineryVersion = readFileSync(join(WC, 'VERSION'), 'utf8').split('\n')[0].trim(); } catch { /* unstamped build */ }
@@ -360,7 +360,7 @@ function laneAddSteps(spec) {
   // and the config entry — the thing that makes the lane EXIST — last.
   // A failure anywhere leaves no claimed lane behind.
   const claimStep = {
-    verb: 'Add', what: `agent "${lane.id}" to ${ctx.name ?? 'the persona'}`, detail: `${lane.model}, ${spec.lane.schedule ? 'their own schedule' : 'the global schedule'}, ${Math.round(target / 1000)}k${lane.armed === false ? ', not armed' : ''}`,
+    verb: 'Add', what: `agent "${lane.id}" to ${ctx.name ?? 'the persona'}`, detail: `${lane.model}, ${spec.lane.schedule ? 'their own schedule' : 'the global schedule'}, ${Math.round(target / 1000)}k${lane.armed === false ? ', not armed' : ''}, ${lane.wakePrompt === null ? 'no wake prompt' : lane.wakePrompt ? 'their own wake prompt' : 'the default wake prompt'}`,
     run() {
       cfg.lanes[lane.id] = { targetTokens: target, model: lane.model, ...wakePromptField(lane), ...(spec.lane.schedule ? { schedule: spec.lane.schedule } : {}) };
       writeFileSync(cfgPath + '.tmp', JSON.stringify(cfg, null, 2) + '\n');

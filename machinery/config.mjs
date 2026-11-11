@@ -365,6 +365,20 @@ export function laneConfig(cfg, lane) {
 // (tmp + rename), whitelisted key paths, per-key type checks, and the
 // loader's own consistency rules re-checked on the RESULT before a byte
 // lands — a config this machinery can't boot from must be unwritable.
+/**
+ * Why wake.sh would refuse this wakePrompt, or null if it is fine. THE one
+ * implementation: wake.sh's inline snippet, creation (nightwatch.mjs), the
+ * set verb (typeCheck below) and the preflight's wakePromptLines
+ * (versioncheck.mjs) all call it, so the rules cannot drift apart.
+ */
+export function wakePromptProblem(v) {
+  if (typeof v !== 'string') return `it is ${Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : 'a ' + typeof v}, not text`;
+  if (!v.trim()) return 'it is empty (use null for "no prompt")';
+  if (/^\s*-/.test(v)) return 'it starts with "-", which claude would read as a flag';
+  if (!/\s/.test(v.trim())) return 'it is a single bare word, which claude could run as a subcommand';
+  return null;
+}
+
 const LANE_KEYS = {
   targetTokens: 'number', emergencyTargetTokens: 'number', contextWindow: 'number',
   switchboard: 'boolean', cwdMarker: 'string', runtime: 'string', modelName: 'string',
@@ -374,7 +388,9 @@ const LANE_KEYS = {
   model: 'string',
   // The first prompt a wake sends (wake.sh): present = the woken session
   // starts its own morning. Absent = no prompt, the session waits for a human.
-  wakePrompt: 'string',
+  // Its own spec type: the set verb must refuse what wake.sh would (a value
+  // that lands by `set` and dies at 08:00 costs a silent morning).
+  wakePrompt: 'wakePrompt',
   schedule: { sleep: 'time', wake: 'time' },
   // The midday cycle (Ra, 10/12): present = on for this lane. A soft bell at
   // softPct of the window (no timer: the agent's own fold is its "ready"),
@@ -426,6 +442,9 @@ function typeCheck(spec, value, path) {
     if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) {
       throw new Error(`${path} takes "HH:MM" (24h), got ${JSON.stringify(value)}`);
     }
+  } else if (spec === 'wakePrompt') {
+    const why = wakePromptProblem(value);
+    if (why) throw new Error(`${path}: wake.sh would refuse this (${why})`);
   } else if (typeof value !== spec) {
     throw new Error(`${path} takes a ${spec}, got ${JSON.stringify(value)}`);
   }

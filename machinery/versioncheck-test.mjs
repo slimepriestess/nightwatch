@@ -437,6 +437,13 @@ function preflightLines(wakeCostsText, claudeBinOk = true, { fallThrough = false
     return { code: r.status, lines: r.stdout.split('\n'), err: r.stderr, stub: s, found };
   } finally { rmSync(hub, { recursive: true, force: true }); }
 }
+check('preflight carries the wakePrompt line: a lane with no prompt is amber (pins the nightshift wiring)', () => {
+  const r = preflightLines(rows('2.1.310'));
+  assert.equal(r.code, 0, r.err);
+  const l = r.lines.find((x) => /lane main/.test(x));
+  assert.ok(l, 'no "lane main" line in:\n' + r.lines.join('\n'));
+  assert.match(l, /^WARN/); assert.match(l, /wakePrompt/);
+});
 check('preflight carries the check: an unseen version is amber and the stub path is named', () => {
   const r = preflightLines(rows('2.1.309'));
   assert.equal(r.code, 0, r.err);

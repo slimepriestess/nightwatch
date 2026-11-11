@@ -263,10 +263,11 @@ WAKE_PROMPT="$("$NODE" -e '
 import(process.argv[1]).then((m) => {
   const v = m.loadConfig().lanes?.[process.argv[2]]?.wakePrompt;
   if (v === undefined || v === "") return;
-  const why = typeof v !== "string" ? `it is a ${typeof v}, not text`
-    : /^\s*-/.test(v) ? "it starts with \"-\", which claude would read as a flag"
-    : !/\s/.test(v.trim()) ? "it is a single bare word, which claude could read as a subcommand"
-    : null;
+  // The rules live once, in config.mjs (wakePromptProblem) — the same check
+  // creation and the set verb already passed, re-run here because a hand
+  // edit answers to nobody. An older config.mjs without it falls to the
+  // outer *) case: logged, and the wake goes on without a prompt.
+  const why = m.wakePromptProblem(v);
   if (why) { console.log(`REFUSED ${why}`); process.exitCode = 3; } else process.stdout.write(v);
 });' "file://$WAKECYCLE_DIR/config.mjs" "$LANE" 2>/dev/null)"
 case $? in

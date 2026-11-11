@@ -276,19 +276,11 @@ export function realIo({ claudeBin, wakeCostsPath, kind, shell, nodePath, spawn 
  */
 export const DEFAULT_WAKE_PROMPT = '[nightwatch] The scheduled wake: no one is at the keyboard yet. Arm your bell watcher, read any notes in your spool, then pick up your standing work.';
 
-/**
- * Why wake.sh would refuse this wakePrompt, or null if it is fine. Mirrors
- * wake.sh's own inline rules (they live twice because wake.sh embeds its
- * check in a node -e; a drift between the two shows up as a creation-time
- * accept that wake-time logs as refused — loud, not silent).
- */
-export function wakePromptProblem(v) {
-  if (typeof v !== 'string') return `it is a ${typeof v}, not text`;
-  if (!v.trim()) return 'it is empty (use null for "no prompt")';
-  if (/^\s*-/.test(v)) return 'it starts with "-", which claude would read as a flag';
-  if (!/\s/.test(v.trim())) return 'it is a single bare word, which claude could run as a subcommand';
-  return null;
-}
+// The one implementation lives in config.mjs (beside LANE_KEYS, called by
+// the set verb, creation, wake.sh's snippet and wakePromptLines below), so
+// the rules cannot drift between writers. Re-exported for callers here.
+export { wakePromptProblem } from './config.mjs';
+import { wakePromptProblem } from './config.mjs';
 
 /**
  * Doctor/preflight lines, one per lane: does its morning wake self-propelled?

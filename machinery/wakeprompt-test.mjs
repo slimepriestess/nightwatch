@@ -77,6 +77,26 @@ try {
   check('a refused lane-add leaves no half-claimed lane behind', () =>
     assert.equal('eps' in lanes() || 'zeta' in lanes(), false));
 
+  // --- the third writer: config.mjs's set verb ----------------------------
+  const setCfg = (val) => {
+    const env = { ...process.env, NIGHTWATCH_CONFIG: hubCfg };
+    delete env.WEFT_CONFIG; delete env.WEFT_LANE; delete env.NIGHTWATCH_LANE;
+    try { return { rc: 0, out: execFileSync(process.execPath, [join(HERE, 'config.mjs'), 'set', 'lanes.alpha.wakePrompt', val], { encoding: 'utf8', env }) }; }
+    catch (e) { return { rc: e.status, out: String(e.stderr ?? '') }; }
+  };
+  check('the set verb refuses a bare word (the 08:00 refusal moved to the keyboard)', () => {
+    const r = setCfg('doctor');
+    assert.notEqual(r.rc, 0);
+    assert.match(r.out, /refuse/i);
+  });
+  check('the set verb refuses flag-shaped text', () =>
+    assert.notEqual(setCfg('"-x morning"').rc, 0));
+  check('the set verb still takes healthy text', () => {
+    const r = setCfg('"[nightwatch] a healthy morning text"');
+    assert.equal(r.rc, 0, r.out);
+    assert.equal(lanes().alpha.wakePrompt, '[nightwatch] a healthy morning text');
+  });
+
   // --- the Doctor/preflight lines ----------------------------------------
   check('wakePromptLines warns, amber-voiced, on a lane with no prompt', () => {
     const ls = wakePromptLines({ lanes: { quiet: { model: 'claude-fable-5' } } });
