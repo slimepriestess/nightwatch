@@ -17,6 +17,8 @@
  *               messages and the sleep bell can't reach it.
  *   login       the login expired ("OAuth session expired", "Please run /login").
  *   usage-limit the account's usage limit.
+ *   request-cut "Unable to connect to API (EPROTO)": requests cut off mid-upload, as images past
+ *               about 4-5 MB did on 10/25. A retry won't help, and it isn't the network.
  *   offline     "Unable to connect to API" / "Can't reach the API server".
  *   slept       "Your computer went to sleep mid-response".
  *   classifier  watch.classifierThreshold auto-mode classifier denials inside
@@ -207,6 +209,8 @@ function errorCause(e) {
   if (e.error === 'authentication_failed' || /OAuth|Login expired|Please run \/login|Failed to authenticate/i.test(t)) return 'login';
   if (e.error === 'rate_limit' && /limit/i.test(t)) return 'usage-limit';
   if (/reached your .{0,40}limit|usage limit/i.test(t)) return 'usage-limit';
+  // EPROTO is a request cut off mid-upload, not a network that's down, and a retry sends the same request.
+  if (/Unable to connect to API.*EPROTO/i.test(t)) return 'request-cut';
   if (/Unable to connect to API|Can't reach the API server|check your internet/i.test(t)) return 'offline';
   if (/went to sleep mid-response/i.test(t)) return 'slept';
   return null;
@@ -232,6 +236,7 @@ const STUCK = {
   login: (a) => ['Logged out', `${cap(a)} is logged out (the login expired). Nothing can happen until someone runs /login in the agent's window.`],
   'usage-limit': (a) => ['Usage limit reached', `${cap(a)} hit the account's usage limit and is stopped until the limit resets or the model is switched (/model).`],
   offline: (a) => ['Can\'t reach the API', `${cap(a)} can't reach the API (connection or DNS). The session retries when the network is back; worth a look if this machine is offline.`],
+  'request-cut': (a) => ['Requests cut off', `${cap(a)}'s requests are being cut off as they upload (EPROTO). If this machine's network is fine, they may be too big: each request sends every image the session has read, and on 10/25 the API was cutting off requests over about 4-5 MB, which may have moved since. A retry sends the same request. Force fold on the agent's card keeps only the newest images.`],
   slept: (a) => ['Cut off by sleep', `${cap(a)} was cut off mid-reply when this machine went to sleep. A short message in the agent's window resumes the session.`],
   classifier: (a, d) => ['Classifier denials', `${cap(a)} has had ${d.count} tool calls denied by the auto mode classifier in ${mins(Wn().classifierWindowMs)} minutes${d.reason ? ` (latest: ${d.reason})` : ''}. The session may be circling something; worth a look.`],
   context: (a, d) => [d.cycleStalled ? 'Midday fold stalled' : 'Context filling up', `${cap(a)} is at ${Math.round(d.ratio * 100)}% of the context window (${Math.round(d.tokens / 1000)}k of ${Math.round(d.window / 1000)}k). ${d.cycleStalled ? 'The midday cycle hasn\'t folded them: its bell was refused or its deadline passed. Force fold folds them now.' : 'Worth a fold at the next good stopping point.'}`],
