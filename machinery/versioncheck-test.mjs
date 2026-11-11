@@ -407,8 +407,10 @@ function preflightLines(wakeCostsText, claudeBinOk = true, { fallThrough = false
     for (const d of ['wakecycle', 'ladder', 'projects', 'sessions']) mkdirSync(join(hub, d), { recursive: true });
     const s = stub('claude-hub', `case "$1" in --help) cat <<'NW_HELP_EOF'\n${HELP(omit)}NW_HELP_EOF\n;; *) echo "2.1.310 (Claude Code)";; esac`);
     writeFileSync(join(hub, 'checkpoint.md'), '# checkpoint\n');
-    // armed: the armed file's text; null leaves it out, as a hub with nights off has none (#68).
-    if (armed !== null) writeFileSync(join(hub, 'wakecycle', 'nightshift.armed'), armed);
+    // armed: the armed file's text; null leaves it out, as a hub with nights off has none (#68),
+    // and { dir: true } puts a directory at its path, a file there that can't be read.
+    if (armed?.dir) mkdirSync(join(hub, 'wakecycle', 'nightshift.armed'));
+    else if (armed !== null) writeFileSync(join(hub, 'wakecycle', 'nightshift.armed'), armed);
     writeFileSync(join(hub, 'ladder', 'wake-costs.jsonl'), wakeCostsText);
     let claudeBin = claudeBinOk ? s : join(hub, 'no-such-claude'); let found = null; const extraEnv = {};
     // On linux and wsl the lookup puts node's own directory first, as the window's PATH does, so a claude installed
@@ -450,6 +452,12 @@ check('preflight runs on a hub with no armed file, as a nights-off hub has none,
   assert.equal(r.code, 0, r.err);
   assert.ok(r.lines.some((x) => /armed file parses as: \[DISARMED\] \(raw: \(no file\)\)/.test(x)), r.lines.join('\n'));
   assert.ok(r.lines.some((x) => /preflight complete/.test(x)), 'the rest of the preflight still runs');
+});
+check('preflight names an armed path it can\'t read, not as a missing file (#72 second read)', () => {
+  const r = preflightLines(rows('2.1.310'), true, { armed: { dir: true } });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(r.lines.some((x) => /armed file parses as: \[DISARMED\] \(raw: \(unreadable: EISDIR\)\)/.test(x)), r.lines.join('\n'));
+  assert.ok(!r.lines.some((x) => /\(no file\)/.test(x)), 'a path that exists is not reported as missing');
 });
 check('preflight carries the flag check: a --help that lists them is ok, naming the stub; one missing a flag is amber and names it', () => {
   const ok = preflightLines(rows('2.1.310'));
