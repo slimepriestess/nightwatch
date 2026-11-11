@@ -3,8 +3,8 @@
 // hub's registry under either lane name, NIGHTWATCH_LANE or the older
 // WEFT_LANE a pre-#7 wake exported (issue #7), and names the config the new
 // way in the arming line it prints. Scratch hub only, per the rehearsal law.
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, utimesSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -35,6 +35,29 @@ try {
 
   run({ NIGHTWATCH_CONFIG: cfg }, 'sid-none');
   check('no lane named registers nothing', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-none'))));
+
+  // #69: the week-old prune runs on every SessionStart, so it must not take
+  // the entry of a session that is still running (a midday-only lane can live
+  // longer than a week between folds). A stand-in for that session's claude:
+  // a process whose command reads "claude".
+  const live = spawn('sleep', ['60'], { argv0: 'claude', stdio: 'ignore' });
+  try {
+    const old = (sid, pid) => {
+      const f = join(hub, 'wakecycle', `lane.${sid}`);
+      writeFileSync(f, JSON.stringify({ lane: 'alpha', pid, at: '2026-10-01T00:00:00Z' }) + '\n');
+      const t = new Date(Date.now() - 9 * 86400e3); utimesSync(f, t, t);
+    };
+    old('sid-live', live.pid);
+    old('sid-dead', 999999);
+    old('sid-notclaude', process.pid);
+    run({ NIGHTWATCH_CONFIG: cfg }, 'sid-plain'); // an unlaned session opened in the hub runs the prune
+    check('a week-old entry whose claude is still running is kept (#69)', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-live'))));
+    check('a week-old entry whose process is gone is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-dead'))));
+    check('a week-old entry whose pid is now some other program is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-notclaude'))));
+    check('a fresh entry is kept', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-new'))));
+  } finally {
+    live.kill();
+  }
 } finally {
   rmSync(hub, { recursive: true, force: true });
 }
