@@ -48,7 +48,10 @@ try {
     const code = `const { execFileSync } = require('node:child_process');
       execFileSync('sh', ['-c', 'sh "$0" < "$1"; true', ${JSON.stringify(hook)}, process.argv[1]], { stdio: 'ignore' });
       process.stdout.write(String(process.pid));`;
-    const input = join(hub, 'hook-input.json'); writeFileSync(input, JSON.stringify({ session_id: 'sid-wrapped' }));
+    // The input sits under a .claude folder, so the wrapper's own command line
+    // mentions claude: only the claude executable itself may be taken.
+    mkdirSync(join(hub, '.claude'), { recursive: true });
+    const input = join(hub, '.claude', 'hook-input.json'); writeFileSync(input, JSON.stringify({ session_id: 'sid-wrapped' }));
     const r = spawnSync(process.execPath, ['-e', code, input], { argv0: 'claude', env: e, encoding: 'utf8' });
     check('the recorded pid is the claude above the hook\'s shell, not the shell (#73, WSL)', () => {
       assert.equal(r.status, 0, r.stderr);
