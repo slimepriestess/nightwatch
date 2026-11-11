@@ -11,8 +11,10 @@
 #
 #   NIGHTWATCH_CONFIG=<hub config> sh bell-watcher.sh <lane>
 #
-# Exits 0 with the note on stdout when one lands. Runs until then; a
-# harness timeout (the usual 2h background cap) just means re-arm.
+# Exits 0 with the note on stdout when one lands, and runs until then: it
+# has no time limit of its own. If a harness caps background tasks, a
+# timeout just means re-arm. (Claude Code on WSL measured no cap on
+# 2026-10-23; a watcher ran 2h54m.)
 set -e
 MACHINERY_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The node wake.sh exported for this session (the daemon's), else the shell's.
@@ -52,6 +54,32 @@ fi
 # tracked one that would have been heard. Only the shell running this script
 # matches: the harness's wrapper carries the same text in its command line,
 # and so does this script's own subshell below (a fork, whose parent is us).
+# Per hub (nightwatch#70): two hubs on one machine can both have a lane
+# called "main", and a lane name alone made one hub's watcher stand down
+# for, or kill, the other's. A watcher's hub is the config named in its
+# environment, so one whose config resolves to a different file than ours
+# belongs to someone else and is left alone. If either side names no
+# config, or the other's environment can't be read, it counts as ours: the
+# old behaviour, never less safe than before.
+MY_CFG="${NIGHTWATCH_CONFIG:-${WEFT_CONFIG:-}}"
+canon() { [ -n "$1" ] && [ -e "$1" ] && echo "$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")" || echo "$1"; }
+MY_HUB="$(canon "$MY_CFG")"
+cfg_of() {
+  if [ -r "/proc/$1/environ" ]; then
+    E="$(tr '\0' '\n' < "/proc/$1/environ" 2>/dev/null)"
+  else
+    E="$(ps -wwE -o command= -p "$1" 2>/dev/null | tr ' ' '\n')"
+  fi
+  v="$(printf '%s\n' "$E" | sed -n 's/^NIGHTWATCH_CONFIG=//p' | head -1)"
+  [ -n "$v" ] || v="$(printf '%s\n' "$E" | sed -n 's/^WEFT_CONFIG=//p' | head -1)"
+  printf '%s' "$v"
+}
+other_hub() {
+  [ -n "$MY_HUB" ] || return 1
+  theirs="$(cfg_of "$1")"
+  [ -n "$theirs" ] || return 1
+  [ "$(canon "$theirs")" != "$MY_HUB" ]
+}
 WATCHERS="$(ps -axo pid=,ppid=,command= | awk -v me="$$" -v tail="bell-watcher.sh $LANE" '
   $1 != me && $2 != me && ($3 == "sh" || $3 == "/bin/sh" || $3 == "bash" || $3 == "/bin/bash") &&
   length($0) >= length(tail) && substr($0, length($0) - length(tail) + 1) == tail { print $1, $2 }')"
@@ -59,6 +87,7 @@ if [ -n "$WATCHERS" ]; then
   LIVE=""
   for pair in $(echo "$WATCHERS" | tr ' ' ':'); do
     pid="${pair%%:*}"; ppid="${pair##*:}"
+    other_hub "$pid" && continue
     pcomm="$(ps -o comm= -p "$ppid" 2>/dev/null)"
     case "${pcomm##*/}" in
       sh|bash|zsh|dash|-sh|-bash|-zsh|-dash) tracked=1 ;;

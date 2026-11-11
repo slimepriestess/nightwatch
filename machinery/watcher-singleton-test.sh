@@ -46,5 +46,35 @@ sleep 6
 check "the tracked watcher exits on the bell" "$(ps -p "$TRACKED" >/dev/null 2>&1 && echo alive || echo gone)" "gone"
 check "and prints it" "$(grep -c 'the bell' "$T/tracked.out")" "1"
 
+# Another hub's watcher with the same lane name is someone else's (nightwatch#70):
+# an arm from hub B must neither stand down for hub A's tracked watcher nor kill
+# a detached one of hub A's. Hub A's tracked watcher is re-armed first.
+mkdir -p "$T/b" && printf '{"paths":{"spool":"%s/b/spool"},"lanes":{"%s":{}}}\n' "$T" "$LANE" > "$T/b/c.json"
+rm -f "$T/spool/$LANE/1-bell.txt"   # the bell above was heard; a waiting note would end the next arm at once
+sh "$W" "$LANE" > "$T/a.out" 2>&1 &
+A=$!
+sleep 2
+WEFT_CONFIG="$T/b/c.json" sh "$W" "$LANE" > "$T/b.out" 2>&1 &
+B=$!
+sleep 3
+check "hub B's arm runs beside hub A's watcher" "$(ps -p "$B" >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+check "hub A's watcher is untouched by it" "$(ps -p "$A" >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+check "hub B didn't call A's watcher its own" "$(grep -c 'already watched' "$T/b.out")" "0"
+kill "$A" "$B" 2>/dev/null; sleep 1
+( WEFT_CONFIG="$T/b/c.json" sh "$W" "$LANE" > "$T/borphan.out" 2>&1 & )
+sleep 2
+BORPHAN="$(watchers | awk '{print $1}')"
+sh "$W" "$LANE" > "$T/a2.out" 2>&1 &
+A2=$!
+sleep 3
+check "hub A's arm doesn't kill hub B's detached watcher" "$(ps -p "$BORPHAN" >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+check "and arms itself" "$(ps -p "$A2" >/dev/null 2>&1 && echo alive || echo gone)" "alive"
+check "A's arms heard no stale note" "$(cat "$T/a.out" "$T/a2.out" | grep -c 'the bell')" "0"
+# A bell in hub B's spool reaches B's watcher, not A's.
+mkdir -p "$T/b/spool/$LANE" && echo "hub b bell" > "$T/b/spool/$LANE/1-bell.txt"
+sleep 6
+check "hub B's bell reaches B's watcher" "$(grep -c 'hub b bell' "$T/borphan.out")" "1"
+check "and not A's" "$(grep -c 'hub b bell' "$T/a2.out")" "0"
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
