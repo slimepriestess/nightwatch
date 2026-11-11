@@ -52,8 +52,21 @@ done
 [ -z "$NW_LANE" ] && exit 0
 SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
-# $PPID is the shell's parent: the claude process that spawned this hook.
-printf '{"lane":"%s","pid":%d,"at":"%s"}\n' "$NW_LANE" "$PPID" \
+# The claude that ran this hook: $PPID where it runs the hook directly (macOS),
+# else the nearest ancestor whose executable is claude, found now while the
+# chain is alive, since Claude Code on WSL runs hooks through a shell that's
+# gone by the time anything reads the entry (marginalia's run, #73). Matched
+# by the command's first word, so a wrapper whose arguments only mention a
+# path under ~/.claude isn't taken; $PPID if none is found.
+CLAUDE_PID=$PPID
+p=$PPID; hops=0
+while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null && [ "$hops" -lt 8 ]; do
+  exe=$(ps -p "$p" -o command= 2>/dev/null | awk '{print $1}')
+  case "${exe##*/}" in claude) CLAUDE_PID=$p; break ;; esac
+  p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' ')
+  hops=$((hops + 1))
+done
+printf '{"lane":"%s","pid":%d,"at":"%s"}\n' "$NW_LANE" "$CLAUDE_PID" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REG/lane.$SESSION_ID"
 SWITCH="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.switchboard" 2>/dev/null || echo false)"
 if [ "$SWITCH" != "true" ]; then
