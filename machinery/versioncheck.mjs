@@ -263,3 +263,41 @@ export function realIo({ claudeBin, wakeCostsPath, kind, shell, nodePath, spawn 
     wakeCostsText: existsSync(wakeCostsPath) ? readFileSync(wakeCostsPath, 'utf8') : '',
   };
 }
+
+// ------------------------------------------------- wakePrompt (lane mornings)
+
+/**
+ * The first prompt a lane created by Set up / Add agent wakes on, unless the
+ * spec says otherwise (a string of its own, or null for no prompt). Exists
+ * because of the dark Saturday (10/31): a hub where only one lane had a
+ * wakePrompt woke three sessions that sat turn-less all day — the daemon did
+ * its half, and nothing asked the sessions to move. Machine-voiced by the
+ * wake.sh contract: it is the harness talking, never the persona or a person.
+ */
+export const DEFAULT_WAKE_PROMPT = '[nightwatch] The scheduled wake: no one is at the keyboard yet. Arm your bell watcher, read any notes in your spool, then pick up your standing work.';
+
+// The one implementation lives in config.mjs (beside LANE_KEYS, called by
+// the set verb, creation, wake.sh's snippet and wakePromptLines below), so
+// the rules cannot drift between writers. Re-exported for callers here.
+export { wakePromptProblem } from './config.mjs';
+import { wakePromptProblem } from './config.mjs';
+
+/**
+ * Doctor/preflight lines, one per lane: does its morning wake self-propelled?
+ * Amber, never red — a missing prompt costs a quiet day, not a night (the
+ * alert-taxonomy rule: red means something is wrong NOW).
+ */
+export function wakePromptLines(cfg) {
+  const out = [];
+  for (const [id, lane] of Object.entries(cfg?.lanes ?? {})) {
+    const v = lane?.wakePrompt;
+    if (v === undefined || v === null || v === '') {
+      out.push(`WARN    lane ${id}: no wakePrompt — the daemon will wake a session that waits silently at the input until a human types (set lanes.${id}.wakePrompt; Set up and Add agent give new lanes a default)`);
+      continue;
+    }
+    const why = wakePromptProblem(v);
+    if (why) out.push(`WARN    lane ${id}: wakePrompt would be refused at wake (${why}), so the wake would go on without a prompt — fix lanes.${id}.wakePrompt`);
+    else out.push(`ok      lane ${id}: wakes with a first prompt`);
+  }
+  return out;
+}
