@@ -3,7 +3,7 @@
 // hub's registry under either lane name, NIGHTWATCH_LANE or the older
 // WEFT_LANE a pre-#7 wake exported (issue #7), and names the config the new
 // way in the arming line it prints. Scratch hub only, per the rehearsal law.
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, utimesSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +35,26 @@ try {
 
   run({ NIGHTWATCH_CONFIG: cfg }, 'sid-none');
   check('no lane named registers nothing', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-none'))));
+
+  // The pid recorded is the claude that ran the hook, though a shell sits
+  // between (Claude Code on WSL runs hooks through one, so the hook's $PPID
+  // is that shell, gone by the time anything reads the entry: marginalia's
+  // run of #73). A stand-in claude (node with argv0 "claude") runs the hook
+  // through `sh -c` with a second command, so the shell doesn't exec it away.
+  {
+    const hook = join(HERE, 'register-lane.sh');
+    const e = { ...process.env, NIGHTWATCH_CONFIG: cfg, NIGHTWATCH_LANE: 'alpha' };
+    for (const k of ['WEFT_CONFIG', 'WEFT_LANE']) delete e[k];
+    const code = `const { execFileSync } = require('node:child_process');
+      execFileSync('sh', ['-c', 'sh "$0" < "$1"; true', ${JSON.stringify(hook)}, process.argv[1]], { stdio: 'ignore' });
+      process.stdout.write(String(process.pid));`;
+    const input = join(hub, 'hook-input.json'); writeFileSync(input, JSON.stringify({ session_id: 'sid-wrapped' }));
+    const r = spawnSync(process.execPath, ['-e', code, input], { argv0: 'claude', env: e, encoding: 'utf8' });
+    check('the recorded pid is the claude above the hook\'s shell, not the shell (#73, WSL)', () => {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(entry('sid-wrapped').pid, Number(r.stdout));
+    });
+  }
 
   // #69: the week-old prune runs on every SessionStart, so it must not take
   // the entry of a session that is still running (a midday-only lane can live
