@@ -98,6 +98,28 @@ check "edge 1: and never kills the stranger" "$(alive "$STRANGER")" "alive"
 check "edge 1: the file now names the arm" "$(cat "$PF" 2>/dev/null)" "$E1"
 check "edge 1: and it says the old pid wasn't a watcher" "$(grep -c "isn't a watcher" "$T/e1.out")" "1"
 kill "$STRANGER" 2>/dev/null
+# Two more strangers, each of which only one half of the check catches (Weft,
+# 11/11): a shell whose line merely contains the watcher's text, and a
+# non-shell whose line ends with it.
+kill "$E1" 2>/dev/null; sleep 1
+for kind in shell-contains other-ends; do
+  case "$kind" in
+    shell-contains) sh -c 'sleep 300; true' bell-watcher.sh "$LANE" extra >/dev/null 2>&1 & ;;
+    other-ends) perl -e 'sleep 300' bell-watcher.sh "$LANE" >/dev/null 2>&1 & ;;
+  esac
+  S=$!
+  sleep 1
+  echo "$S" > "$PF"
+  sh "$W" "$LANE" > "$T/s-$kind.out" 2>&1 &
+  SA=$!
+  sleep 3
+  check "edge 1 ($kind): the arm runs" "$(alive "$SA")" "alive"
+  check "edge 1 ($kind): the stranger is untouched" "$(alive "$S")" "alive"
+  pkill -P "$S" 2>/dev/null; kill "$S" "$SA" 2>/dev/null; sleep 1   # the shell stranger's sleep too
+done
+sh "$W" "$LANE" > "$T/e1.out" 2>&1 &
+E1=$!
+sleep 3
 # Edge 3: a SIGKILL leaves the file behind, naming a pid that's gone.
 kill -9 "$E1" 2>/dev/null; sleep 1
 check "edge 3: a SIGKILL leaves the file behind" "$(cat "$PF" 2>/dev/null)" "$E1"
