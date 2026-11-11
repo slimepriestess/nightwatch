@@ -259,13 +259,18 @@ set -- --append-system-prompt-file "$HEAD" --system-prompt-snapshot off
 # session (Opus's read of claude --help). Those are refused: logged, and the
 # wake goes on without a prompt, because a bad optional knob must not cost the
 # morning.
-if [ -n "$FIRSTWAKE" ]; then
-  # A FIRST wake never takes the prompt (Ra's ruling, 11/11): creation is
-  # human-confirmed by nightwatch.mjs's own invariant, so a first wake is
-  # never an unattended morning — the porch and welcome text own the first
-  # turn, the wakePrompt owns every scheduled morning after. Logged when one
-  # was configured, so a keeper wondering where their prompt went finds the
-  # answer here.
+# A CREATION's wake never takes the prompt (Ra's ruling, 11/11): creation is
+# human-confirmed by nightwatch.mjs's own invariant, so that wake is never an
+# unattended morning — the porch and welcome text own the first turn, the
+# wakePrompt owns every scheduled morning after. The test is Set up's own
+# `created: true` marker, NOT firstWake: sleep.mjs writes firstWake receipts
+# for an EXISTING lane's morning after a zero-turn day, which is exactly the
+# unattended morning the prompt exists for (Sonnet's hold on #74), and any
+# unknown future firstWake writer fails toward the prompt, the cheap side.
+CREATEDWAKE=$(python3 -c "import json;d=json.load(open('$NEXT'));print('1' if d.get('firstWake') and d.get('created') else '')")
+if [ -n "$CREATEDWAKE" ]; then
+  # Logged when a prompt was configured, so a keeper wondering where their
+  # prompt went finds the answer here.
   "$NODE" -e '
 import(process.argv[1]).then((m) => {
   const v = m.loadConfig().lanes?.[process.argv[2]]?.wakePrompt;

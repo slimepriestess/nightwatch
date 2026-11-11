@@ -417,7 +417,12 @@ function firstSessionStep(spec, hub, ctx, noActivate, cpPath, laneWc) {
   const prep = {
     verb: 'Write', what: `the first-wake note's receipt`, detail: `next-wake.${spec.lane.id}.json: a fresh session, no tail to resume`,
     run() {
-      writeFileSync(join(wcDir, `next-wake.${spec.lane.id}.json`), JSON.stringify({ firstWake: true, lane: spec.lane.id, checkpoint: cp, createdAt: new Date().toISOString() }) + '\n');
+      // created: true marks this as a CREATION's receipt, distinct from the
+      // firstWake receipts sleep.mjs writes for an existing lane's morning
+      // after a zero-turn day: wake.sh's prompt skip keys on created alone,
+      // so any other firstWake writer fails toward the prompt (Sonnet's
+      // hold on #74 — the zero-turn morning is the one the prompt is for).
+      writeFileSync(join(wcDir, `next-wake.${spec.lane.id}.json`), JSON.stringify({ firstWake: true, created: true, lane: spec.lane.id, checkpoint: cp, createdAt: new Date().toISOString() }) + '\n');
     },
   };
   const launch = {

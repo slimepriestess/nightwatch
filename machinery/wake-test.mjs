@@ -201,17 +201,31 @@ check('a resumed wake with a wakePrompt passes it last, as one argument, quote a
     assert.deepEqual(argv.slice(0, 3), ['--resume', '00000000-0000-0000-0000-000000000002', '--fork-session']);
   } finally { rmSync(hub, { recursive: true, force: true }); }
 });
-// A FIRST wake never takes the prompt (Ra's ruling, 11/11): creation is
-// human-confirmed by nightwatch.mjs's own invariant, so a first wake is never
-// an unattended morning — the porch and welcome text own the first turn, the
-// wakePrompt owns every scheduled morning after.
-check('a first wake with a wakePrompt does NOT pass it, and the log says where it went', () => {
-  const hub = scratchHub({ firstWake: true }, { lane: { wakePrompt: WAKE_PROMPT } });
+// A CREATION's first wake never takes the prompt (Ra's ruling, 11/11):
+// creation is human-confirmed by nightwatch.mjs's own invariant, so that
+// wake is never an unattended morning — the porch and welcome text own the
+// first turn, the wakePrompt owns every scheduled morning after. The skip
+// needs Set up's explicit `created: true` marker, NOT the shared firstWake
+// flag: sleep.mjs writes firstWake receipts for an EXISTING lane's morning
+// after a zero-turn day, which is exactly the unattended morning the prompt
+// exists for (Sonnet's hold on #74) — an unknown future writer of firstWake
+// fails toward the prompt, the cheap side.
+check("Set up's first wake (created: true) does NOT get the prompt, and the log says where it went", () => {
+  const hub = scratchHub({ firstWake: true, created: true }, { lane: { wakePrompt: WAKE_PROMPT } });
   try {
     const r = runWake(hub);
     assert.equal(r.status, 0, `wake.sh exited ${r.status}: ${r.stdout}${r.stderr}`);
     assert.deepEqual(argvOf(hub).slice(-2), ['--system-prompt-snapshot', 'off']);
     assert.match(readFileSync(join(hub, 'nightshift.log'), 'utf8'), /first wake.*wakePrompt not passed/);
+  } finally { rmSync(hub, { recursive: true, force: true }); }
+});
+check("a zero-turn day's fresh start (firstWake, reason, no created) DOES get the prompt: it is the unattended morning the prompt exists for", () => {
+  const hub = scratchHub({ firstWake: true, reason: 'zero-turn-day', from: '00000000-0000-0000-0000-000000000004' }, { lane: { wakePrompt: WAKE_PROMPT } });
+  try {
+    const r = runWake(hub);
+    assert.equal(r.status, 0, `wake.sh exited ${r.status}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(argvOf(hub).slice(-3), ['--system-prompt-snapshot', 'off', WAKE_PROMPT]);
+    assert.doesNotMatch(argvOf(hub).join('\n'), /--resume/, 'a zero-turn fresh start still resumes nothing');
   } finally { rmSync(hub, { recursive: true, force: true }); }
 });
 // A wakePrompt claude would misread is refused, logged, and the wake goes on without it (Opus's asks on #53):
