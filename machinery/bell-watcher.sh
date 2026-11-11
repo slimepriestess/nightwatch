@@ -11,8 +11,10 @@
 #
 #   NIGHTWATCH_CONFIG=<hub config> sh bell-watcher.sh <lane>
 #
-# Exits 0 with the note on stdout when one lands. Runs until then; a
-# harness timeout (the usual 2h background cap) just means re-arm.
+# Exits 0 with the note on stdout when one lands, and runs until then: it
+# has no time limit of its own. If a harness caps background tasks, a
+# timeout just means re-arm. (Claude Code on WSL measured no cap on
+# 2026-10-23; a watcher ran 2h54m.)
 set -e
 MACHINERY_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The node wake.sh exported for this session (the daemon's), else the shell's.
@@ -49,32 +51,77 @@ fi
 # detached watcher looked tracked, and the arm stood down for it (10/17). Twice a
 # detached watcher looked like coverage (10/14, then again under load on
 # 10/16), and a guard that only counted processes declined to arm the
-# tracked one that would have been heard. Only the shell running this script
-# matches: the harness's wrapper carries the same text in its command line,
-# and so does this script's own subshell below (a fork, whose parent is us).
-WATCHERS="$(ps -axo pid=,ppid=,command= | awk -v me="$$" -v tail="bell-watcher.sh $LANE" '
-  $1 != me && $2 != me && ($3 == "sh" || $3 == "/bin/sh" || $3 == "bash" || $3 == "/bin/bash") &&
-  length($0) >= length(tail) && substr($0, length($0) - length(tail) + 1) == tail { print $1, $2 }')"
-if [ -n "$WATCHERS" ]; then
-  LIVE=""
-  for pair in $(echo "$WATCHERS" | tr ' ' ':'); do
-    pid="${pair%%:*}"; ppid="${pair##*:}"
+# tracked one that would have been heard. The process judged is the one the
+# pid file names (below): the shell running this script, never a match on
+# text, which the harness's wrapper and this script's own subshells share.
+# Per hub (nightwatch#70): two hubs on one machine can both have a lane
+# called "main", so a machine-wide match on the lane name made one hub's
+# watcher stand down for, or kill, the other's. The judgment now starts from
+# this hub's own spool: the watcher that holds the lane writes its pid to
+# <spool>/<lane>/.watcher.pid, and an arm judges only the pid that file names
+# (no environment reads, which macOS can't do; Sonnet Weft, 11/10). The loop
+# lists only *.txt, and plain ls hides dotfiles, so the file can't ring.
+#   - The file counts only if its pid is a watcher for this lane NOW: a shell
+#     whose command line ends `bell-watcher.sh <lane>`. A pid some stranger
+#     has since been given is never stood down for and never killed; its
+#     file is stale and replaced (Weft's edge 1, the worst failure here:
+#     a guard that stands down for a stranger leaves the bells unheard).
+#   - A watcher it names that's tracked (its parent is a shell): stand down.
+#     One that's detached: stopped, and this arm takes its place.
+#   - The claim is made with noclobber, so two arms at once can't both win;
+#     the loser judges the winner (edge 2).
+#   - The file is removed at exit only while it still names us, and a file
+#     left by a SIGKILL names a pid that's gone, so it's stale (edge 3).
+# A watcher armed by code from before this has no file, so after an upgrade
+# one can run beside the new arm until it exits: two listeners on one spool
+# both hear the next note. A duplicate, never a silence.
+PIDFILE="$SPOOL/.watcher.pid"
+ARM_MARK=""
+is_watcher() {
+  line="$(ps -o command= -p "$1" 2>/dev/null)" || return 1
+  first="${line%% *}"
+  case "${first##*/}" in sh|bash|dash|zsh) ;; *) return 1 ;; esac
+  case "$line" in *"bell-watcher.sh $LANE") return 0 ;; esac
+  return 1
+}
+stand_down() {   # true when an arm must not run a second watcher
+  [ -f "$PIDFILE" ] || return 1
+  held="$(tr -cd '0-9' < "$PIDFILE" 2>/dev/null || true)"
+  if [ -n "$held" ] && [ "$held" != "$$" ] && is_watcher "$held"; then
+    ppid="$(ps -o ppid= -p "$held" 2>/dev/null | tr -d ' ')"
     pcomm="$(ps -o comm= -p "$ppid" 2>/dev/null)"
     case "${pcomm##*/}" in
       sh|bash|zsh|dash|-sh|-bash|-zsh|-dash) tracked=1 ;;
       *) tracked=0 ;;
     esac
-    if [ "$ppid" = "1" ] || [ "$tracked" = 0 ]; then
-      kill "$pid" 2>/dev/null && echo "bell-watcher: stopped pid $pid, a detached watcher for $LANE (its exit would reach no one)"
-    else
-      LIVE="$LIVE $pid"
+    if [ "$ppid" != "1" ] && [ "$tracked" = 1 ]; then
+      echo "bell-watcher: $LANE is already watched by pid $held (a tracked watcher); not arming a second. Nothing to re-arm."
+      return 0
     fi
-  done
-  if [ -n "$LIVE" ]; then
-    echo "bell-watcher: $LANE is already watched by pid$LIVE (a tracked watcher); not arming a second. Nothing to re-arm."
-    exit 0
+    kill "$held" 2>/dev/null && echo "bell-watcher: stopped pid $held, a detached watcher for $LANE (its exit would reach no one)"
+  elif [ -n "$held" ] && [ "$held" != "$$" ]; then
+    echo "bell-watcher: $PIDFILE named pid $held, which isn't a watcher for $LANE now; replacing it"
   fi
-fi
+  rm -f "$PIDFILE"
+  return 1
+}
+cleanup() {
+  [ -n "$ARM_MARK" ] && rm -f "$ARM_MARK"
+  [ "$(cat "$PIDFILE" 2>/dev/null)" = "$$" ] && rm -f "$PIDFILE"
+  return 0
+}
+tries=0
+while :; do
+  stand_down && exit 0
+  if ( set -C; echo "$$" > "$PIDFILE" ) 2>/dev/null; then break; fi
+  tries=$((tries + 1))
+  [ "$tries" -lt 5 ] || { echo "bell-watcher: couldn't claim $PIDFILE"; exit 4; }
+  sleep 1   # another arm claimed it between our judgment and our claim; judge that one
+done
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 # At every exit, the due notes still waiting are listed after the note
 # printed, so whoever reads that note sees them too: on a plain install the
 # watcher is the only path a due note takes, and this is what makes "by the
@@ -85,10 +132,8 @@ due_tail() {
   [ -n "$LEFT" ] && { echo "--- due notes also waiting here, for your next seam:"; echo "$LEFT" | sed 's/^/  /'; }
   return 0
 }
-ARM_MARK=""
 if [ -n "$DUE" ]; then
   ARM_MARK="$(mktemp "${TMPDIR:-/tmp}/bell-watcher-arm.XXXXXX")"
-  trap 'rm -f "$ARM_MARK"' EXIT
 fi
 echo "bell-watcher up: lane=$LANE spool=$SPOOL${DUE:+ due=$DUE} poll=5s (exits on first note)"
 if [ -n "$DUE" ]; then
@@ -124,5 +169,7 @@ while :; do
       exit 0
     fi
   fi
-  sleep 5
+  # In the background and waited for, so a TERM is taken at once: with a
+  # trap set, sh would otherwise finish the sleep before handling it.
+  sleep 5 & wait $!
 done
