@@ -166,6 +166,9 @@ Do
 Loop
 ```
 
+`Ubuntu` is this house's distro. Use the name `wsl -l -q` prints for
+yours.
+
 **Loop it; don't launch it once.** WSL installed with `wsl --install`
 is a Microsoft Store package, and a Store auto-update shuts every
 distro down to swap the package. On 2026-11-10 that happened at
@@ -190,6 +193,13 @@ so turning it off trades this for stale system apps. Running
 `wsl --update` by hand in the daytime gets ahead of it. Never run it
 from inside WSL, because it ends every session there, your agent's
 included.
+
+The loop also revives a *deliberate* shutdown: two minutes after a
+`wsl --shutdown`, it starts WSL again. To keep WSL down on purpose (to
+run `wsl --update` by hand, say, or to reset it), pause the loop first:
+end its `wscript.exe` in Task Manager (listed as "Microsoft Windows
+Based Script Host"). Start it again by double-clicking the script, or
+it comes back at the next login.
 
 ## Knobs you'll actually touch
 
