@@ -107,15 +107,21 @@ export function catchUpArchive({ transcripts, archive }) {
     // Each session under its own try: one that can't be caught up is
     // reported, and the rest (and the folding session's own copy) go on.
     try {
-      sweepPartials(join(archive, m[1], 'subagents'));
+      // The sweep under its own try too: a damaged <sid>/subagents in the
+      // archive (unreadable, or a file) is reported, and the session's own
+      // catch-up below still runs.
+      const sweep = [];
+      try { sweepPartials(join(archive, m[1], 'subagents')); } catch (e) { sweep.push({ file: 'subagents/ (archive)', error: e.message }); }
+      const withSweep = (r) => (sweep.length ? { ...r, subagentErrors: [...sweep, ...(r.subagentErrors ?? [])] } : r);
       const src = join(transcripts, f);
-      if (!existsSync(src)) continue;
-      if (statSync(src).size > statSync(join(archive, f)).size) { done.push(archiveTranscript(m[1], { transcripts, archive })); continue; }
+      if (!existsSync(src)) { if (sweep.length) done.push(withSweep({ sid: m[1] })); continue; }
+      if (statSync(src).size > statSync(join(archive, f)).size) { done.push(withSweep(archiveTranscript(m[1], { transcripts, archive }))); continue; }
       // A background subagent can outlive its session's last turn, so its
       // transcript may grow while the main one doesn't.
       const { subagents = [], subagentErrors } = archiveSubagents(m[1], { transcripts, archive });
       const changed = subagents.filter((x) => !x.unchanged);
-      if (changed.length || subagentErrors) done.push({ sid: m[1], ...(changed.length ? { subagents: changed } : {}), ...(subagentErrors ? { subagentErrors } : {}) });
+      const r = withSweep({ sid: m[1], ...(changed.length ? { subagents: changed } : {}), ...(subagentErrors ? { subagentErrors } : {}) });
+      if (changed.length || r.subagentErrors) done.push(r);
     } catch (e) { done.push({ sid: m[1], error: e.message }); }
   }
   return done;
