@@ -39,13 +39,34 @@ if [ -n "$NW_CFG" ]; then
 else
   REG="$SELF_DIR"
 fi
-# Prune stale entries so the registry never grows unboundedly.
-find "$REG" -maxdepth 1 -name 'lane.*' -mtime +7 -delete 2>/dev/null
+# Prune stale entries so the registry never grows unboundedly, but never a
+# running session's: this runs on every SessionStart in the hub, and a lane
+# with no nightly fold (midday only) can run one session for longer than a
+# week, so an entry stays while its recorded claude is alive (#69).
+# One find for the week-old entries, not one per entry: this runs at every start.
+find "$REG" -maxdepth 1 -type f -name 'lane.*' -mtime +7 2>/dev/null | while IFS= read -r f; do
+  pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$f")
+  if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q claude; then continue; fi
+  rm -f "$f"
+done
 [ -z "$NW_LANE" ] && exit 0
 SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
-# $PPID is the shell's parent: the claude process that spawned this hook.
-printf '{"lane":"%s","pid":%d,"at":"%s"}\n' "$NW_LANE" "$PPID" \
+# The claude that ran this hook: $PPID where it runs the hook directly (macOS),
+# else the nearest ancestor whose executable is claude, found now while the
+# chain is alive, since Claude Code on WSL runs hooks through a shell that's
+# gone by the time anything reads the entry (marginalia's run, #73). Matched
+# by the command's first word, so a wrapper whose arguments only mention a
+# path under ~/.claude isn't taken; $PPID if none is found.
+CLAUDE_PID=$PPID
+p=$PPID; hops=0
+while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null && [ "$hops" -lt 8 ]; do
+  exe=$(ps -p "$p" -o command= 2>/dev/null | awk '{print $1}')
+  case "${exe##*/}" in claude) CLAUDE_PID=$p; break ;; esac
+  p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' ')
+  hops=$((hops + 1))
+done
+printf '{"lane":"%s","pid":%d,"at":"%s"}\n' "$NW_LANE" "$CLAUDE_PID" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REG/lane.$SESSION_ID"
 SWITCH="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.switchboard" 2>/dev/null || echo false)"
 if [ "$SWITCH" != "true" ]; then

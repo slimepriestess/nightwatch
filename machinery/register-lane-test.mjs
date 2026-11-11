@@ -3,8 +3,8 @@
 // hub's registry under either lane name, NIGHTWATCH_LANE or the older
 // WEFT_LANE a pre-#7 wake exported (issue #7), and names the config the new
 // way in the arming line it prints. Scratch hub only, per the rehearsal law.
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, utimesSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -35,6 +35,86 @@ try {
 
   run({ NIGHTWATCH_CONFIG: cfg }, 'sid-none');
   check('no lane named registers nothing', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-none'))));
+
+  // The pid recorded is the claude that ran the hook, though a shell sits
+  // between (Claude Code on WSL runs hooks through one, so the hook's $PPID
+  // is that shell, gone by the time anything reads the entry: marginalia's
+  // run of #73). A stand-in claude (node with argv0 "claude") runs the hook
+  // through `sh -c` with a second command, so the shell doesn't exec it away.
+  {
+    const hook = join(HERE, 'register-lane.sh');
+    const e = { ...process.env, NIGHTWATCH_CONFIG: cfg, NIGHTWATCH_LANE: 'alpha' };
+    for (const k of ['WEFT_CONFIG', 'WEFT_LANE']) delete e[k];
+    const code = `const { execFileSync } = require('node:child_process');
+      execFileSync('sh', ['-c', 'sh "$0" < "$1"; true', ${JSON.stringify(hook)}, process.argv[1]], { stdio: 'ignore' });
+      process.stdout.write(String(process.pid));`;
+    // The input sits under a .claude folder, so the wrapper's own command line
+    // mentions claude: only the claude executable itself may be taken.
+    mkdirSync(join(hub, '.claude'), { recursive: true });
+    const input = join(hub, '.claude', 'hook-input.json'); writeFileSync(input, JSON.stringify({ session_id: 'sid-wrapped' }));
+    const r = spawnSync(process.execPath, ['-e', code, input], { argv0: 'claude', env: e, encoding: 'utf8' });
+    check('the recorded pid is the claude above the hook\'s shell, not the shell (#73, WSL)', () => {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(entry('sid-wrapped').pid, Number(r.stdout));
+    });
+  }
+
+  // Two lines of the walk-up Sonnet's second read found unpinned. A wrapper
+  // whose own executable sits under a claude-named folder isn't claude: only
+  // an executable named claude is. And with no claude within reach the entry
+  // records the hook's $PPID, which is what keeps it right where ps's first
+  // word can't name claude (a home folder with a space in it).
+  {
+    const hook = join(HERE, 'register-lane.sh');
+    const e = { ...process.env, NIGHTWATCH_CONFIG: cfg, NIGHTWATCH_LANE: 'alpha' };
+    for (const k of ['WEFT_CONFIG', 'WEFT_LANE']) delete e[k];
+    const inputFor = (sid) => { const f = join(hub, `input-${sid}.json`); writeFileSync(f, JSON.stringify({ session_id: sid })); return f; };
+    const runner = join(hub, '.claude', 'hooks', 'run');
+    const code = `const { execFileSync } = require('node:child_process');
+      execFileSync('sh', ['-c', 'sh "$0" < "$1"; true', ${JSON.stringify(hook)}, process.argv[1]], { stdio: 'ignore', argv0: ${JSON.stringify(runner)} });
+      process.stdout.write(String(process.pid));`;
+    const r = spawnSync(process.execPath, ['-e', code, inputFor('sid-runner')], { argv0: 'claude', env: e, encoding: 'utf8' });
+    check('a wrapper whose own path is under a claude-named folder is passed over for the claude above it', () => {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(entry('sid-runner').pid, Number(r.stdout));
+    });
+    // Nine shells between the hook and anything above it put any claude past
+    // the walk's reach; the innermost one, the hook's parent, writes its pid.
+    const chain = join(hub, 'chain.sh');
+    const pidFile = join(hub, 'innermost.pid');
+    writeFileSync(chain, `if [ "$1" -gt 0 ]; then sh "$0" $(($1 - 1)) "$2" "$3"; true; else echo $$ > ${JSON.stringify(pidFile)}; sh ${JSON.stringify(hook)} < "$2"; true; fi\n`);
+    execFileSync('sh', [chain, '8', inputFor('sid-noclaude'), 'x'], { env: e, stdio: 'ignore' });
+    check('with no claude in reach, the entry records the hook\'s parent', () => {
+      assert.equal(entry('sid-noclaude').pid, Number(readFileSync(pidFile, 'utf8').trim()));
+    });
+  }
+
+  // #69: the week-old prune runs on every SessionStart, so it must not take
+  // the entry of a session that is still running (a midday-only lane can live
+  // longer than a week between folds). A stand-in for that session's claude:
+  // a process whose command reads "claude".
+  const live = spawn('sleep', ['60'], { argv0: 'claude', stdio: 'ignore' });
+  // Some other program now at a recorded pid: a plain sleep, whose command
+  // line names no claude wherever the checkout sits.
+  const other = spawn('sleep', ['60'], { stdio: 'ignore' });
+  try {
+    const old = (sid, pid) => {
+      const f = join(hub, 'wakecycle', `lane.${sid}`);
+      writeFileSync(f, JSON.stringify({ lane: 'alpha', pid, at: '2026-10-01T00:00:00Z' }) + '\n');
+      const t = new Date(Date.now() - 9 * 86400e3); utimesSync(f, t, t);
+    };
+    old('sid-live', live.pid);
+    old('sid-dead', 999999);
+    old('sid-notclaude', other.pid);
+    run({ NIGHTWATCH_CONFIG: cfg }, 'sid-plain'); // an unlaned session opened in the hub runs the prune
+    check('a week-old entry whose claude is still running is kept (#69)', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-live'))));
+    check('a week-old entry whose process is gone is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-dead'))));
+    check('a week-old entry whose pid is now some other program is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-notclaude'))));
+    check('a fresh entry is kept', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-new'))));
+  } finally {
+    live.kill();
+    other.kill();
+  }
 } finally {
   rmSync(hub, { recursive: true, force: true });
 }
