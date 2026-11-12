@@ -23,7 +23,8 @@
 //  14. a resumed session (#24) — picked from the session list, it went on
 //      under a new id that carries the old turns; folding the belled (old) id
 //      folds and archives the new one. A pointer to a file that lacks the old
-//      turns is refused out loud and the old file folds, with no continuedFrom.
+//      turns, or that can't be read, is refused out loud and the old file
+//      folds, with no continuedFrom.
 // Run: node machinery/archive-test.mjs   (exit 0 = all pass)
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -404,6 +405,18 @@ try {
     check('14b the fold row names A, with no continuedFrom', lastFold(h)?.source === `jsonl:${A}` && lastFold(h)?.continuedFrom === undefined, lastFold(h));
     const tail = lastFold(h)?.tail ? readFileSync(join(h.transcripts, `${lastFold(h).tail}.jsonl`), 'utf8') : '';
     check('14b the tail holds A\'s own last turn', tail.includes('prompt 2') && tail.includes('reply 2'), lastFold(h));
+  }
+  // 14c. Sonnet's read of #24: the pointer's target exists but can't be read
+  //      (a directory named <id>.jsonl). The fold must still happen, of A,
+  //      and say why it didn't follow; main folded A here too.
+  {
+    const h = hub();
+    transcript(h, A, 3, [{ type: 'continued-in', continuedInSessionId: RESUMED }, { type: 'cost-state', totalCostUSD: 1 }]);
+    mkdirSync(join(h.transcripts, `${RESUMED}.jsonl`));
+    const r = sleep(h, A);
+    check('14c an unreadable target still folds (exit 0)', r.code === 0, r.err);
+    check('14c and says it did not follow, and why', /NOT FOLLOWING continued-in aaaaaaaa → eeeeeeee: it can't be read \(EISDIR\)/.test(r.err), r.err);
+    check('14c the fold row names A, with no continuedFrom', lastFold(h)?.source === `jsonl:${A}` && lastFold(h)?.continuedFrom === undefined, lastFold(h));
   }
 } finally {
   for (const r of roots) rmSync(r, { recursive: true, force: true });

@@ -12,7 +12,7 @@
 // that isn't there; LOOP points at itself. Expect OLD → NEW, a missing hop
 // stops where the record is, and a self-pointer never spins.
 // Run: node wakecycle/deadwake-test.mjs   (exit 0 = all pass)
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveFoldSource, cannotAnswer, followContinued, liveTranscriptPath } from './deadwake.mjs';
@@ -68,6 +68,37 @@ write('MOVED', [...early, user('x', 'go'), reply('y-rewritten', 'answer'), user(
 const apiReq = { type: 'api-request', requestId: 'r' };
 write('MANYROWS', [...early, apiReq, apiReq, apiReq, apiReq, ...late, apiReq, apiReq, contIn('FEWROWS'), cost]);
 write('FEWROWS', [...early, ...late, user('zz2', 'goodnight')]);
+// Sonnet's read of #24 (2026-11-12): a real resume with nothing said since
+// (the same rows, the same newest timestamp) is followed, not "older".
+const stamped = [at(user('a', 'morning'), '2026-10-28T10:00:00Z'), at(reply('b', 'on it'), '2026-10-28T17:00:00Z')];
+write('SAMETIME', [...stamped, contIn('SAMETIME2'), cost]);
+write('SAMETIME2', stamped);
+// A pointing file with no prompts: an unrelated target is refused; one that
+// carries its rows is followed.
+write('NOPROMPT', [reply('np1', 'x'), contIn('UNRELATED')]);
+write('UNRELATED', [user('q1', 'other'), reply('q2', 'y')]);
+write('NOPROMPT2', [reply('np2', 'x'), contIn('CARRIES')]);
+write('CARRIES', [reply('np2', 'x'), user('q3', 'next')]);
+// A target that exists but can't be read stops where the record is, said.
+mkdirSync(join(dir, 'ISDIR.jsonl'));
+write('TODIR', [...early, contIn('ISDIR')]);
+write('LOCKED', [...early, user('p', 'goodnight')]);
+chmodSync(join(dir, 'LOCKED.jsonl'), 0o000);
+write('TOLOCKED', [...early, contIn('LOCKED')]);
+// The pointer is read from the tail: a file bigger than the tail window
+// whose pointer sits more than the window from the end is not followed (the
+// real pointer is the last row but for cost-state); and a big file with no
+// pointer resolves to itself.
+const pad = (n) => Array.from({ length: n }, (_, i) => ({ type: 'api-request', requestId: `pad-${i}`, body: 'x'.repeat(200) }));
+write('BURIED', [...early, contIn('NEW'), ...pad(400)]);
+write('BIGPLAIN', [...early, ...pad(400)]);
+// Two copies pointing at each other: one hop, then the cycle guard stops it.
+write('CYC1', [...early, contIn('CYC2')]);
+write('CYC2', [...early, contIn('CYC1')]);
+// A pointing file that holds the same prompt row twice (a duplicated line) is
+// still a real resume: equal positions are not 'out of order'.
+write('DUPROW', [...early, user('a', 'morning'), ...late, contIn('DUPNEW')]);
+write('DUPNEW', [...early, ...late, user('dn', 'after')]);
 
 let fails = 0;
 function check(name, ok, detail = '') {
@@ -105,6 +136,18 @@ try {
   check('liveTranscriptPath reads the end of the chain', liveTranscriptPath('OLD', dir) === join(dir, 'NEW.jsonl'));
   check('liveTranscriptPath stays put on a refused pointer', liveTranscriptPath('P2', dir) === join(dir, 'P2.jsonl'));
   check('liveTranscriptPath of an unresumed or missing session is its own file', liveTranscriptPath('LIVE', dir) === join(dir, 'LIVE.jsonl') && liveTranscriptPath('NOPE', dir) === join(dir, 'NOPE.jsonl'));
+  check('a self-pointer follows nothing and refuses nothing', fc('LOOP').followed.length === 0 && fc('LOOP').refused === null, fc('LOOP'));
+  check('a resume with nothing said since (same rows, same newest timestamp) is followed', fc('SAMETIME').sid === 'SAMETIME2' && fc('SAMETIME').refused === null, fc('SAMETIME'));
+  check('a pointing file with no prompts: an unrelated target is refused', refusedAt('NOPROMPT', 'UNRELATED', /no prompts to compare/), fc('NOPROMPT'));
+  check('a pointing file with no prompts: a target carrying its rows is followed', fc('NOPROMPT2').sid === 'CARRIES', fc('NOPROMPT2'));
+  check('a target that is a directory is refused, never a throw', refusedAt('TODIR', 'ISDIR', /can't be read \(EISDIR\)/), fc('TODIR'));
+  const asRoot = process.getuid?.() === 0; // root reads a chmod 000 file anyway
+  check('a target that can\'t be read (chmod 000) is refused, never a throw', asRoot || refusedAt('TOLOCKED', 'LOCKED', /can't be read \(EACCES\)/), fc('TOLOCKED'));
+  check('liveTranscriptPath stays put on an unreadable target', liveTranscriptPath('TODIR', dir) === join(dir, 'TODIR.jsonl'));
+  check('a pointer buried deeper than the tail window is not read (tail-only)', fc('BURIED').sid === 'BURIED' && fc('BURIED').followed.length === 0, fc('BURIED'));
+  check('a big file with no pointer is itself', fc('BIGPLAIN').sid === 'BIGPLAIN', fc('BIGPLAIN'));
+  check('a two-file cycle takes one hop and stops', fc('CYC1').sid === 'CYC2' && fc('CYC1').followed.join() === 'CYC1', fc('CYC1'));
+  check('a duplicated prompt row in the pointing file is still followed', fc('DUPROW').sid === 'DUPNEW' && fc('DUPROW').refused === null, fc('DUPROW'));
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

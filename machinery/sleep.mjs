@@ -40,7 +40,7 @@ const flag = (name, dflt) => {
   const i = args.indexOf(name);
   return i !== -1 ? args[i + 1] : dflt;
 };
-let sessionId = flag('--session', process.env.CLAUDE_CODE_SESSION_ID); // reassigned once, by the dead-wake resolution below
+let sessionId = flag('--session', process.env.CLAUDE_CODE_SESSION_ID); // reassigned at most twice below: forward along a continued-in chain, then back by the dead-wake resolution
 // Whether the id was NAMED or merely inherited decides how much the registry
 // guard below may forgive: an inherited id running under another hub's config
 // is the cross-hub class (rehearsal, 10/7 — a scratch hub's fold reached for

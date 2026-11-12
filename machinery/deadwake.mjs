@@ -15,7 +15,7 @@
 // later hit the limit.
 //
 // Pure reads; never writes. Returns { sid, skipped: [dead sids], why }.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, openSync, readSync, fstatSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 
 function readEntries(path) {
@@ -103,26 +103,55 @@ export function resolveFoldSource(sessionId, { transcripts, foldsPath, maxHops =
 // (fewer api-request rows), so counting rows would refuse the real incident;
 // and it never repeats the continued-in row. So the test is: every user-row
 // uuid of the pointing file appears in the target, in the same order, and the
-// target's newest timestamp is not older than the pointing file's. A refusal
-// stops the walk where the record is and says why.
+// target's newest timestamp is not older than the pointing file's. A pointing
+// file with no user rows has nothing to compare by prompt, so the target must
+// carry at least one of its rows (else any file, an empty one included, would
+// pass: Sonnet's read of #24). A refusal stops the walk where the record is and
+// says why; so does a hop whose file exists but can't be read.
 //
 // Pure reads; never writes. Returns { sid, followed: [earlier sids],
 // refused: null | { from, to, why } }.
 export function containsResume(fromEntries, toEntries) {
   const index = new Map();
   toEntries.forEach((e, i) => { if (e.uuid && !index.has(e.uuid)) index.set(e.uuid, i); });
-  let at = -1;
+  let at = -1, prompts = 0;
   for (const e of fromEntries) {
     if (e.type !== 'user' || !e.uuid) continue;
+    prompts++;
     const i = index.get(e.uuid);
     if (i === undefined) return { ok: false, why: `it lacks the pointing file's prompt ${e.uuid}` };
     if (i < at) return { ok: false, why: `it holds the pointing file's prompts out of order (${e.uuid})` };
     at = i;
   }
+  if (!prompts && !fromEntries.some((e) => e.uuid && index.has(e.uuid))) {
+    return { ok: false, why: 'the pointing file has no prompts to compare, and the target carries none of its rows' };
+  }
   const newest = (es) => es.reduce((m, e) => { const t = Date.parse(e.timestamp ?? ''); return Number.isFinite(t) && t > m ? t : m; }, -Infinity);
   const from = newest(fromEntries), to = newest(toEntries);
   if (from > to) return { ok: false, why: `it is older (newest entry ${Number.isFinite(to) ? new Date(to).toISOString() : 'none'} < ${new Date(from).toISOString()})` };
   return { ok: true, why: '' };
+}
+
+// The continued-in pointer is the file's last row but for Claude Code's
+// trailing bookkeeping (cost-state), so read the tail and parse the whole file
+// only when there is one. liveTranscriptPath runs on every nightshift tick for
+// every live session; a full parse of a 92 MB transcript took 350-440 ms
+// (Sonnet's timing), against a stat before. Throws if the file can't be read.
+const TAIL_BYTES = 64 * 1024;
+function tailPointer(path) {
+  const fd = openSync(path, 'r');
+  try {
+    const size = fstatSync(fd).size;
+    const len = Math.min(size, TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    const lines = buf.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('"continued-in"')) continue;
+      try { const e = JSON.parse(lines[i]); if (e.type === 'continued-in') return e.continuedInSessionId ?? null; } catch {}
+    }
+    return null;
+  } finally { closeSync(fd); }
 }
 
 export function followContinued(sessionId, { transcripts, maxHops = 8 }) {
@@ -131,10 +160,12 @@ export function followContinued(sessionId, { transcripts, maxHops = 8 }) {
   for (let hop = 0; hop < maxHops; hop++) {
     const path = join(transcripts, `${sid}.jsonl`);
     if (!existsSync(path)) break;
-    const entries = readEntries(path);
-    const next = entries.filter((e) => e.type === 'continued-in').at(-1)?.continuedInSessionId;
+    let next;
+    try { next = tailPointer(path); } catch { break; } // unreadable: the record is here, the fold reports it
     if (!next || next === sid || followed.includes(next) || !existsSync(join(transcripts, `${next}.jsonl`))) break;
-    const plausible = containsResume(entries, readEntries(join(transcripts, `${next}.jsonl`)));
+    let plausible;
+    try { plausible = containsResume(readEntries(path), readEntries(join(transcripts, `${next}.jsonl`))); }
+    catch (e) { plausible = { ok: false, why: `it can't be read (${e.code ?? e.message})` }; }
     if (!plausible.ok) return { sid, followed, refused: { from: sid, to: next, why: plausible.why } };
     followed.push(sid);
     sid = next;
@@ -148,8 +179,8 @@ export function followContinued(sessionId, { transcripts, maxHops = 8 }) {
 // checks): after a resume the old file stops growing at once, so read by the
 // registered id it looks quiet while the conversation is busy elsewhere.
 export function liveTranscriptPath(sessionId, transcripts) {
-  try { return join(transcripts, `${followContinued(sessionId, { transcripts }).sid}.jsonl`); }
-  catch { return join(transcripts, `${sessionId}.jsonl`); }
+  // followContinued never throws (a missing or unreadable hop stops the walk).
+  return join(transcripts, `${followContinued(sessionId, { transcripts }).sid}.jsonl`);
 }
 
 // CLI, for the recovery recipe and the bench:
