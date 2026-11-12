@@ -159,10 +159,12 @@ try {
   // tailPointer closes what it opens: a leak would stop the walk silently at
   // the fd limit (Sonnet: EMFILE after ~30,000 calls). Count this process's
   // open descriptors before and after a few hundred walks.
-  const fds = () => { try { return readdirSync('/proc/self/fd').length; } catch { return readdirSync('/dev/fd').length; } };
+  // No /proc or /dev/fd on native Windows (Sonnet): there the count is skipped, said.
+  const fds = () => { for (const d of ['/proc/self/fd', '/dev/fd']) { try { return readdirSync(d).length; } catch {} } return null; };
   const before = fds();
   for (let i = 0; i < 300; i++) liveTranscriptPath('OLD', dir);
-  check('300 walks leave no file descriptor open', fds() === before, `${before} -> ${fds()}`);
+  if (before === null) console.log('SKIP  300 walks leave no file descriptor open (no /proc/self/fd or /dev/fd here)');
+  else check('300 walks leave no file descriptor open', fds() === before, `${before} -> ${fds()}`);
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
