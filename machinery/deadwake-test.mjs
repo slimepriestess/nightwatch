@@ -12,7 +12,7 @@
 // that isn't there; LOOP points at itself. Expect OLD → NEW, a missing hop
 // stops where the record is, and a self-pointer never spins.
 // Run: node wakecycle/deadwake-test.mjs   (exit 0 = all pass)
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveFoldSource, cannotAnswer, followContinued, liveTranscriptPath } from './deadwake.mjs';
@@ -99,6 +99,12 @@ write('CYC2', [...early, contIn('CYC1')]);
 // still a real resume: equal positions are not 'out of order'.
 write('DUPROW', [...early, user('a', 'morning'), ...late, contIn('DUPNEW')]);
 write('DUPNEW', [...early, ...late, user('dn', 'after')]);
+// Sonnet's delta read: an unreadable STARTING file stays put (no throw); a
+// file with two pointers follows the last one (the walk reads from the end).
+write('LOCKEDSTART', [...early, contIn('NEW')]);
+chmodSync(join(dir, 'LOCKEDSTART.jsonl'), 0o000);
+mkdirSync(join(dir, 'DIRSTART.jsonl'));
+write('TWOPTR', [...early, contIn('UNRELATED'), contIn('NEW')]);
 
 let fails = 0;
 function check(name, ok, detail = '') {
@@ -148,6 +154,15 @@ try {
   check('a big file with no pointer is itself', fc('BIGPLAIN').sid === 'BIGPLAIN', fc('BIGPLAIN'));
   check('a two-file cycle takes one hop and stops', fc('CYC1').sid === 'CYC2' && fc('CYC1').followed.join() === 'CYC1', fc('CYC1'));
   check('a duplicated prompt row in the pointing file is still followed', fc('DUPROW').sid === 'DUPNEW' && fc('DUPROW').refused === null, fc('DUPROW'));
+  check('an unreadable starting file stays put, never a throw', (asRoot || (fc('LOCKEDSTART').sid === 'LOCKEDSTART' && fc('LOCKEDSTART').followed.length === 0)) && fc('DIRSTART').sid === 'DIRSTART', [fc('LOCKEDSTART'), fc('DIRSTART')]);
+  check('two pointers in one file: the last one is followed', fc('TWOPTR').sid === 'NEW' && fc('TWOPTR').refused === null, fc('TWOPTR'));
+  // tailPointer closes what it opens: a leak would stop the walk silently at
+  // the fd limit (Sonnet: EMFILE after ~30,000 calls). Count this process's
+  // open descriptors before and after a few hundred walks.
+  const fds = () => { try { return readdirSync('/proc/self/fd').length; } catch { return readdirSync('/dev/fd').length; } };
+  const before = fds();
+  for (let i = 0; i < 300; i++) liveTranscriptPath('OLD', dir);
+  check('300 walks leave no file descriptor open', fds() === before, `${before} -> ${fds()}`);
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }
