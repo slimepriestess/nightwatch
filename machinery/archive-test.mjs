@@ -20,6 +20,11 @@
 //      an unreadable grown transcript, a damaged archive-side folder;
 //   9. the trim's output check — a broken-format session is refused (event +
 //      stderr, no receipt), and torn lines are counted into the fold row.
+//  14. a resumed session (#24) — picked from the session list, it went on
+//      under a new id that carries the old turns; folding the belled (old) id
+//      folds and archives the new one. A pointer to a file that lacks the old
+//      turns, or that can't be read, is refused out loud and the old file
+//      folds, with no continuedFrom.
 // Run: node machinery/archive-test.mjs   (exit 0 = all pass)
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync, readdirSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -93,6 +98,7 @@ const A = 'aaaaaaaa-0000-4000-8000-000000000001';
 const B = 'bbbbbbbb-0000-4000-8000-000000000002';
 const TAIL = 'cccccccc-0000-4000-8000-000000000003';
 const DEAD = 'dddddddd-0000-4000-8000-000000000004';
+const RESUMED = 'eeeeeeee-0000-4000-8000-000000000005';
 
 try {
   // 1. Authored fold.
@@ -352,6 +358,65 @@ try {
     const r = sleep(h, B);
     check(`${name} a fold beside a damaged archive folder${gone ? ' whose source is gone' : ', nothing grown,'} succeeds`, r.code === 0, r.err);
     check(`${name} the sweep's error is still said`, /COULD NOT COPY subagent subagents\/ \(archive\) of aaaaaaaa/.test(r.err), r.err);
+  }
+  // 14. Resumed (#24): A was picked from the session list and went on as
+  //     RESUMED. A's file ends at the resume (continued-in, then cost-state).
+  //     RESUMED carries A's rows under their own uuids, as the real resumed
+  //     files do (2026-11-12, archive/transcripts), then the goodnight after.
+  //     The bell names A.
+  const resumedFrom = (h, from, to, more) => {
+    const rows = readFileSync(join(h.transcripts, `${from}.jsonl`), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((e) => e.uuid);
+    let prev = rows.at(-1).uuid;
+    const out = rows.map((e) => ({ ...e, sessionId: to }));
+    for (let i = 0; i < more; i++) {
+      for (const e of [
+        { type: 'user', message: { role: 'user', content: `after resume ${i}` } },
+        { type: 'assistant', message: { role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: `reply after resume ${i}` }] } },
+      ]) {
+        const uuid = `resu-${out.length}`;
+        out.push({ parentUuid: prev, uuid, sessionId: to, timestamp: `2026-10-11T11:${String(out.length).padStart(2, '0')}:00.000Z`, ...e });
+        prev = uuid;
+      }
+    }
+    writeFileSync(join(h.transcripts, `${to}.jsonl`), out.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  };
+  {
+    const h = hub();
+    transcript(h, A, 3, [{ type: 'continued-in', continuedInSessionId: RESUMED }, { type: 'cost-state', totalCostUSD: 1 }]);
+    resumedFrom(h, A, RESUMED, 2);
+    const r = sleep(h, A);
+    check('14 resumed fold succeeds', r.code === 0, r.err);
+    check('14 it says out loud that it followed the resume', /RESUMED/.test(r.err) && !/NOT FOLLOWING/.test(r.err), r.err);
+    check('14 the fold row names the newest file and where it came from', lastFold(h)?.source === `jsonl:${RESUMED}` && lastFold(h)?.continuedFrom?.join() === A, lastFold(h));
+    const tail = lastFold(h)?.tail ? readFileSync(join(h.transcripts, `${lastFold(h).tail}.jsonl`), 'utf8') : '';
+    check('14 the tail reaches the turns after the resume', tail.includes('after resume 1') && tail.includes('reply after resume 1'), lastFold(h));
+    check('14 the newest file is archived, byte-identical', same(join(h.transcripts, `${RESUMED}.jsonl`), join(h.archive, `${RESUMED}.jsonl`)));
+  }
+  // 14b. The review's P2 through the real sleep.mjs: A points at a file that
+  //      lacks A's turns (a shorter, unrelated transcript). Refused out loud;
+  //      A folds as itself, no continuedFrom, A's own turns in the tail.
+  {
+    const h = hub();
+    transcript(h, A, 3, [{ type: 'continued-in', continuedInSessionId: RESUMED }, { type: 'cost-state', totalCostUSD: 1 }]);
+    transcript(h, RESUMED, 1);
+    const r = sleep(h, A);
+    check('14b a refused pointer still folds', r.code === 0, r.err);
+    check('14b and says it did not follow, and why', /NOT FOLLOWING continued-in aaaaaaaa → eeeeeeee: it lacks/.test(r.err) && !/RESUMED —/.test(r.err), r.err);
+    check('14b the fold row names A, with no continuedFrom', lastFold(h)?.source === `jsonl:${A}` && lastFold(h)?.continuedFrom === undefined, lastFold(h));
+    const tail = lastFold(h)?.tail ? readFileSync(join(h.transcripts, `${lastFold(h).tail}.jsonl`), 'utf8') : '';
+    check('14b the tail holds A\'s own last turn', tail.includes('prompt 2') && tail.includes('reply 2'), lastFold(h));
+  }
+  // 14c. Sonnet's read of #24: the pointer's target exists but can't be read
+  //      (a directory named <id>.jsonl). The fold must still happen, of A,
+  //      and say why it didn't follow; main folded A here too.
+  {
+    const h = hub();
+    transcript(h, A, 3, [{ type: 'continued-in', continuedInSessionId: RESUMED }, { type: 'cost-state', totalCostUSD: 1 }]);
+    mkdirSync(join(h.transcripts, `${RESUMED}.jsonl`));
+    const r = sleep(h, A);
+    check('14c an unreadable target still folds (exit 0)', r.code === 0, r.err);
+    check('14c and says it did not follow, and why', /NOT FOLLOWING continued-in aaaaaaaa → eeeeeeee: it can't be read \(EISDIR\)/.test(r.err), r.err);
+    check('14c the fold row names A, with no continuedFrom', lastFold(h)?.source === `jsonl:${A}` && lastFold(h)?.continuedFrom === undefined, lastFold(h));
   }
 } finally {
   for (const r of roots) rmSync(r, { recursive: true, force: true });

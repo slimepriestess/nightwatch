@@ -31,7 +31,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { configEnv, contextOfEntries, loadConfig, reloadConfig, switchboardLane } from './config.mjs';
-import { cannotAnswer } from './deadwake.mjs';
+import { cannotAnswer, liveTranscriptPath } from './deadwake.mjs';
 import { claudeVersionLines, flagLines, nodeLines, nodeRealIo, realIo as claudeVersionIo, wakePromptLines } from './versioncheck.mjs';
 
 const HOME = homedir();
@@ -329,15 +329,19 @@ function laneSessionsRanked(sessions, attribution, lane) {
 // A session's context now: the newest real reply's input side against the
 // lane's window, read from the transcript's tail (the watch's measure,
 // contextOfEntries). Null when there's no reply with usage yet.
+// These readers judge a RUNNING session by its file, so they read the file it
+// lives in now: after a resume the registered id's file stops growing at once
+// and reads quiet (and stale) while the conversation goes on in the new one
+// (nightwatch#24; liveTranscriptPath in deadwake.mjs, the fold's own rules).
 function contextNow(sessionId, lane) {
   try {
-    const lines = readFileSync(join(PROJECT_DIR, `${sessionId}.jsonl`), 'utf8').split('\n').filter((l) => l.trim()).slice(-400);
+    const lines = readFileSync(liveTranscriptPath(sessionId, PROJECT_DIR), 'utf8').split('\n').filter((l) => l.trim()).slice(-400);
     const entries = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
     return contextOfEntries(CFG, lane, entries);
   } catch { return null; }
 }
 function transcriptQuietMs(sessionId) {
-  try { return Date.now() - statSync(join(PROJECT_DIR, `${sessionId}.jsonl`)).mtimeMs; } catch { return Infinity; }
+  try { return Date.now() - statSync(liveTranscriptPath(sessionId, PROJECT_DIR)).mtimeMs; } catch { return Infinity; }
 }
 
 // The ritual's text, separately buildable so --rehearse can assert what a
@@ -479,10 +483,10 @@ const io = {
     return existsSync(nw) ? statSync(nw).mtimeMs : 0;
   },
   closePid: (pid) => process.kill(pid, 'SIGTERM'),
-  cannotAnswer: (sessionId) => cannotAnswer(join(PROJECT_DIR, `${sessionId}.jsonl`)),
+  cannotAnswer: (sessionId) => cannotAnswer(liveTranscriptPath(sessionId, PROJECT_DIR)),
   lastEntryIsApiError: (sessionId) => {
     try {
-      const lines = readFileSync(join(PROJECT_DIR, `${sessionId}.jsonl`), 'utf8')
+      const lines = readFileSync(liveTranscriptPath(sessionId, PROJECT_DIR), 'utf8')
         .split('\n').filter((l) => l.trim());
       for (let i = lines.length - 1; i >= Math.max(0, lines.length - 5); i--) {
         const e = JSON.parse(lines[i]);
@@ -1806,7 +1810,7 @@ if (process.argv.includes('--fold-now')) {
   LIVE_EMIT = true;
   // A dead wake can't hear a bell; waiting out the deadline only delays the
   // fold (10/8: ten minutes of nothing, then the forced fold). Force now.
-  const dead = cannotAnswer(join(PROJECT_DIR, `${live[0].sessionId}.jsonl`));
+  const dead = cannotAnswer(liveTranscriptPath(live[0].sessionId, PROJECT_DIR));
   const now_ = dead || withinMin === 0;
   if (dead) {
     log(`DEAD WAKE: ${lane} session ${live[0].sessionId.slice(0, 8)}… can't take a prompt — fold-now skips the bell and forces at once`);
@@ -1892,7 +1896,7 @@ if (process.argv.includes('--midday')) {
   const urgentMin = mc.urgentMin ?? 10;
   LIVE_EMIT = true;
   const sid = live[0].sessionId;
-  const dead = cannotAnswer(join(PROJECT_DIR, `${sid}.jsonl`));
+  const dead = cannotAnswer(liveTranscriptPath(sid, PROJECT_DIR));
   if (dead) {
     log(`DEAD WAKE: ${lane} session ${sid.slice(0, 8)}… can't take a prompt — the midday ${tier} bell forces at once`);
     emitEvent('dead-wake', { lane, session: sid, alarm: true });
@@ -1953,7 +1957,7 @@ if (process.argv.includes('--ring')) {
     console.error(`--ring: agent ${lane} is not awake — nothing to bell`);
     process.exit(3);
   }
-  if (cannotAnswer(join(PROJECT_DIR, `${live[0].sessionId}.jsonl`))) {
+  if (cannotAnswer(liveTranscriptPath(live[0].sessionId, PROJECT_DIR))) {
     console.error(`--ring: ${lane}'s session can't take a prompt ("Prompt is too long"), so a bell can't reach it. Use Fold now: it folds from the last session that ran and opens a fresh window.`);
     process.exit(4);
   }

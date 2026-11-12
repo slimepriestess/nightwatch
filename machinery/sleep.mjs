@@ -20,7 +20,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadConfig, laneConfig } from './config.mjs';
-import { resolveFoldSource } from './deadwake.mjs';
+import { resolveFoldSource, followContinued } from './deadwake.mjs';
 import { archiveTranscript, catchUpArchive } from './archive.mjs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +40,7 @@ const flag = (name, dflt) => {
   const i = args.indexOf(name);
   return i !== -1 ? args[i + 1] : dflt;
 };
-let sessionId = flag('--session', process.env.CLAUDE_CODE_SESSION_ID); // reassigned once, by the dead-wake resolution below
+let sessionId = flag('--session', process.env.CLAUDE_CODE_SESSION_ID); // reassigned at most twice below: forward along a continued-in chain, then back by the dead-wake resolution
 // Whether the id was NAMED or merely inherited decides how much the registry
 // guard below may forgive: an inherited id running under another hub's config
 // is the cross-hub class (rehearsal, 10/7 — a scratch hub's fold reached for
@@ -224,6 +224,20 @@ const levelNum = (l) => Number(String(l).replace(/^L/, '')) || 0;
 const visible = entries.filter((e) => !(e.parent && present.has(e.parent)));
 visible.sort((a, b) => levelNum(b.level) - levelNum(a.level));
 
+// ── Resumed under a new id? Fold the newest file ──
+// Before the dead-wake walk: that one goes back to the session a wake came
+// from, this one forward to where a resumed conversation went. See
+// followContinued in deadwake.mjs.
+const continued = followContinued(sessionId, { transcripts: CFG.paths.transcripts });
+if (continued.followed.length) {
+  console.error(`sleep.mjs: RESUMED — ${[...continued.followed, continued.sid].map((s) => s.slice(0, 8)).join(' → ')} (continued-in); folding ${continued.sid.slice(0, 8)}, the newest.`);
+  sessionId = continued.sid;
+}
+if (continued.refused) {
+  const { from, to, why } = continued.refused;
+  console.error(`sleep.mjs: NOT FOLLOWING continued-in ${from.slice(0, 8)} → ${to.slice(0, 8)}: ${why}. Folding ${continued.sid.slice(0, 8)}, where the record is; look at both files.`);
+}
+
 // ── Dead wake? Fold the session it came from instead ──
 // A session woken from a tail that never got a real turn in (the newest
 // reply is "Prompt is too long", nothing of its own but errors) holds the
@@ -359,6 +373,7 @@ appendFileSync(
     ...(trimOut.tornLines ? { tornLines: trimOut.tornLines } : {}),
     ...(trimOut.claudeVersion ? { claudeVersion: trimOut.claudeVersion } : {}),
     tail: trimOut.newSessionId,
+    ...(continued.followed.length ? { continuedFrom: continued.followed } : {}),
     ...(deadWake.skipped.length ? { deadWakesSkipped: deadWake.skipped } : {}),
     ...(archived.error ? { archiveError: archived.error } : { archived: archived.path }),
     // The agent transcripts the archive now holds for this session (unchanged
