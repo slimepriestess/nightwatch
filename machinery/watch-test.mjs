@@ -26,7 +26,7 @@ const config = (extra = {}) => {
   const file = join(root, 'nightwatch.config.json');
   writeFileSync(file, JSON.stringify({
     weftRoot: root, persona: { name: 'Lark' },
-    lanes: { fable: { targetTokens: 250000 }, opus: { targetTokens: 250000, name: 'Heron' } },
+    lanes: { fable: { targetTokens: 250000 }, opus: { targetTokens: 250000, given: 'Heron' } },
     notify: { macos: false, command: recorder },
     paths: { transcripts: dirs.projects, sessions: dirs.sessions },
     ...extra,

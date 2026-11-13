@@ -603,9 +603,10 @@ export function assemble(cfg, io, range = '8h') {
     const activity = alive ? sessionActivity(cfg, io, sessionSid, r && livePids.has(r.pid) ? r.pid : undefined, livePids) : undefined;
     return {
       id, model: lc.modelName ?? (id === 'fable' ? 'Fable 5' : id === 'opus' ? 'Opus 5.5' : 'Claude'), modelId: stats.model ?? 'live',
-      // An agent's chosen given name (lanes.<id>.name): the emitter and
-      // runtime already prefer card.name over the lane key when present.
-      ...(lc.name ? { name: lc.name } : {}),
+      // An agent's chosen given name (lanes.<id>.given). Display only:
+      // card.name stays the routing ref (runtime.js laneRef sends
+      // data-name ?? data-lane to the host; hubs.mjs sets name on purpose).
+      ...(typeof lc.given === 'string' && lc.given.trim() ? { given: lc.given.trim() } : {}),
       role: lc.switchboard ? 'switchboard' : 'lane', state,
       // A hook-registered session with a live pid is the truest receipt;
       // the ps --resume sid is a fork-wake's TAIL, kept for manual resumes.

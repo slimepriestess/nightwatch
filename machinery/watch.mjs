@@ -96,9 +96,10 @@ function emit(event) {
 // a single-agent hub reads just its name.
 function agentLabel(lane) {
   const name = CFG.persona?.name;
-  // An agent's chosen given name (lanes.<id>.name) outranks the lane key,
-  // which stays plumbing (spool paths, registry, fold rows).
-  const shown = CFG.lanes?.[lane]?.name ?? lane;
+  // An agent's chosen given name (lanes.<id>.given) outranks the lane key,
+  // which stays plumbing (spool paths, registry, fold rows, routing refs).
+  const g = CFG.lanes?.[lane]?.given;
+  const shown = typeof g === 'string' && g.trim() ? g.trim() : lane;
   const several = Object.keys(CFG.lanes ?? {}).length > 1;
   if (name) return several ? `${name} (${shown})` : name;
   return `the ${shown} agent`;

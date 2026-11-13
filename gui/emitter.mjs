@@ -535,10 +535,10 @@ function node_li(ctx, [kind, st, t, tm, tip, c], lanes = null, stack = 0) {
 // A lane's name on its card, and its label where every lane is listed at
 // once (timeline rows, log): the same unless several personas share the page
 // (gui/hubs.mjs qualifies ids as "<persona>/<lane>" then).
-const laneName = (L) => L.name ?? L.id;
+const laneName = (L) => L.given ?? L.name ?? L.id;
 function laneLabel(ctx, id) {
   const L = ctx.LANES.find((x) => x.id === id);
-  if (L) return L.label ?? L.id;
+  if (L) return L.label ?? L.given ?? L.id;
   const i = id.indexOf('/');
   const p = i < 0 ? null : ctx.LANES.map((x) => x.persona).find((x) => x && x.id === id.slice(0, i));
   return p ? `${p.name} · ${id.slice(i + 1)}` : id;

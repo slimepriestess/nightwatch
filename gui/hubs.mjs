@@ -73,7 +73,7 @@ export function mergeSnapshots(parts) {
   let ACTIVITY = null, DAEMON = null;
   for (const { snap, persona } of tagged) {
     for (const L of snap.LANES) {
-      LANES.push({ ...L, id: key(persona, L.id), name: L.id, label: `${persona.name} · ${L.id}`, persona: { ...L.persona, ...persona } });
+      LANES.push({ ...L, id: key(persona, L.id), name: L.id, label: `${persona.name} · ${L.given ?? L.id}`, persona: { ...L.persona, ...persona } });
     }
     for (const [lane, nodes] of Object.entries(snap.NIGHT)) NIGHT[key(persona, lane)] = nodes;
     for (const [day, rows] of snap.LOG) {

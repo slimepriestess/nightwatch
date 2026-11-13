@@ -477,12 +477,14 @@ const usageLine = (id, agoMs, ctxTokens, outTokens) => JSON.stringify({
     readDir: () => [], stat: () => null, readTail: () => null,
     livePids: () => [], psCommand: () => null, now: () => NOW,
   };
-  const named = { ...cfg, lanes: { fable: { targetTokens: 250_000, switchboard: true, name: 'Heron' } } };
-  const withName = assemble(named, io, '8h').LANES.find((x) => x.id === 'fable');
-  const withoutName = assemble(cfg, io, '8h').LANES.find((x) => x.id === 'fable');
-  check('lanes.<id>.name reaches the card, and its absence leaves none',
-    withName?.name === 'Heron' && withoutName?.name === undefined,
-    JSON.stringify([withName?.name ?? null, withoutName?.name ?? null]));
+  const named = { ...cfg, lanes: { fable: { targetTokens: 250_000, switchboard: true, given: 'Heron' } } };
+  const blank = { ...cfg, lanes: { fable: { targetTokens: 250_000, switchboard: true, given: '  ' } } };
+  const withGiven = assemble(named, io, '8h').LANES.find((x) => x.id === 'fable');
+  const without = assemble(cfg, io, '8h').LANES.find((x) => x.id === 'fable');
+  const blanked = assemble(blank, io, '8h').LANES.find((x) => x.id === 'fable');
+  check('lanes.<id>.given reaches the card; absence and a blank string leave none, and name stays untouched',
+    withGiven?.given === 'Heron' && withGiven?.name === undefined && without?.given === undefined && blanked?.given === undefined,
+    JSON.stringify([withGiven?.given ?? null, withGiven?.name ?? null, without?.given ?? null, blanked?.given ?? null]));
 }
 
 console.log(failures === 0 ? 'PROBES CLEAN' : `PROBES: ${failures} failure(s)`);
