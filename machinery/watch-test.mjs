@@ -26,7 +26,7 @@ const config = (extra = {}) => {
   const file = join(root, 'nightwatch.config.json');
   writeFileSync(file, JSON.stringify({
     weftRoot: root, persona: { name: 'Lark' },
-    lanes: { fable: { targetTokens: 250000 }, opus: { targetTokens: 250000 } },
+    lanes: { fable: { targetTokens: 250000 }, opus: { targetTokens: 250000, name: 'Heron' } },
     notify: { macos: false, command: recorder },
     paths: { transcripts: dirs.projects, sessions: dirs.sessions },
     ...extra,
@@ -111,6 +111,7 @@ append('s-offline', reply('back online'));
 const ctx = (input) => ({ ...reply('x'), message: { ...reply('x').message, usage: { input_tokens: 0, cache_read_input_tokens: input, output_tokens: 1 } } });
 append('s-context', ctx(820_000)); // between the re-arm line and the warning: the same episode
 tick();
+check("a lane's configured name replaces the key in its labels", /Lark \(Heron\)/.test(lines(SENT).find((l) => l.kind === 'stuck' && l.cause === 'request-cut')?.body ?? ''), true);
 check('a cut-off request dates its figure', /on 10\/25.*4-5 MB/.test(lines(SENT).find((l) => l.kind === 'stuck' && l.cause === 'request-cut')?.body ?? ''), true);
 check('a cut-off request names the fold, not the network', [/Force fold/.test(lines(SENT).find((l) => l.kind === 'stuck' && l.cause === 'request-cut')?.body ?? ''), /connection or DNS/.test(lines(SENT).find((l) => l.kind === 'stuck' && l.cause === 'request-cut')?.body ?? '')], [true, false]);
 check('recovery clears offline, once, and sends nothing', [lines(EVENTS).slice(first.length).map((e) => `${e.kind}:${e.cause}`), lines(SENT).length - sent.length], [['stuck-cleared:offline'], 0]);
