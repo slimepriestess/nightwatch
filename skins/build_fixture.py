@@ -557,12 +557,12 @@ def node_li(kind, st, t, tm, tip, c, lanes=None, stack=0):
 # once (timeline rows, log): the same unless several personas share the page
 # (gui/hubs.mjs qualifies ids as "<persona>/<lane>" then).
 def lane_name(L):
-    return L.get("name") or L["id"]
+    return L.get("given") or L.get("name") or L["id"]
 
 def lane_label(lane_id):
     for L in LANES:
         if L["id"] == lane_id:
-            return L.get("label") or L["id"]
+            return L.get("label") or L.get("given") or L["id"]
     i = lane_id.find("/")
     if i >= 0:
         for L in LANES:

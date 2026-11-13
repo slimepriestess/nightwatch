@@ -91,5 +91,34 @@ check("config file: Set up's name first, else our legacy hub's",
   check('same-named personas get distinct ids (and so distinct lane keys)', J([m.PERSONAS.map((p) => p.id), m.LANES.map((L) => L.id)]) === J([['weft', 'weft-2'], ['weft/fable', 'weft-2/fable']]), J(m.LANES.map((L) => L.id)));
 }
 
+
+// ---- probe: a given name is display-only — it never enters the routing ref
+// (11/13, the #75 second read's blocker: runtime.js laneRef sends
+// data-name ?? data-lane to the host, so a given name in data-name would
+// make every card button target a lane the host refuses).
+{
+  const given = structuredClone(FIXTURE);
+  given.LANES[0] = { ...given.LANES[0], given: 'Heron' };
+  const html = renderPage(given);
+  check('given: the heading and avatar initial show it',
+    html.includes('<h2 data-part="name">Heron</h2>') && /data-part="avatar"[^>]*>H</.test(html),
+    html.match(/<h2 data-part="name">[^<]*/g)?.join() ?? 'no heading');
+  check('given: the routing ref never carries it (no data-name, data-lane stays the key)',
+    !html.includes('data-name="Heron"') && html.includes('data-lane="fable"'),
+    html.match(/data-name="[^"]*"/g)?.join() ?? 'no data-name (good)');
+  check('given: the strip label reads it',
+    html.includes('data-label="Heron"'),
+    html.match(/data-label="[^"]*"/g)?.join() ?? 'no strips');
+  const a = snap({ persona: 'Lark', lanes: ['fable'] });
+  a.LANES[0] = { ...a.LANES[0], given: 'Heron' };
+  const b = snap({ persona: 'Wren', lanes: ['fable'] });
+  const m = mergeSnapshots([{ root: '/hub/lark', snap: a }, { root: '/hub/wren', snap: b }]);
+  check('given: a multi-hub merge keeps name = the bare key for routing, and the label carries the given name',
+    m.LANES.map((L) => L.name).every((n) => n === 'fable')
+      && m.LANES.find((L) => L.id === 'lark/fable')?.label === 'Lark \u00b7 Heron'
+      && m.LANES.find((L) => L.id === 'wren/fable')?.label === 'Wren \u00b7 fable',
+    JSON.stringify(m.LANES.map((L) => [L.id, L.name, L.label])));
+}
+
 console.log(failures === 0 ? 'HUBS PROBES CLEAN' : `HUBS PROBES: ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

@@ -469,5 +469,23 @@ const usageLine = (id, agoMs, ctxTokens, outTokens) => JSON.stringify({
   check('a refused fold leaves a live lane belled, with the red card', L?.state === 'belled' && L?.alert?.kind === 'trim-failed', JSON.stringify([L?.state, L?.alert?.kind ?? null]));
 }
 
+
+// ---- probe: a lane's configured display name reaches its card (11/13)
+{
+  const io = {
+    readText: (p) => p === '/armed' ? 'fable' : null,
+    readDir: () => [], stat: () => null, readTail: () => null,
+    livePids: () => [], psCommand: () => null, now: () => NOW,
+  };
+  const named = { ...cfg, lanes: { fable: { targetTokens: 250_000, switchboard: true, given: 'Heron' } } };
+  const blank = { ...cfg, lanes: { fable: { targetTokens: 250_000, switchboard: true, given: '  ' } } };
+  const withGiven = assemble(named, io, '8h').LANES.find((x) => x.id === 'fable');
+  const without = assemble(cfg, io, '8h').LANES.find((x) => x.id === 'fable');
+  const blanked = assemble(blank, io, '8h').LANES.find((x) => x.id === 'fable');
+  check('lanes.<id>.given reaches the card; absence and a blank string leave none, and name stays untouched',
+    withGiven?.given === 'Heron' && withGiven?.name === undefined && without?.given === undefined && blanked?.given === undefined,
+    JSON.stringify([withGiven?.given ?? null, withGiven?.name ?? null, without?.given ?? null, blanked?.given ?? null]));
+}
+
 console.log(failures === 0 ? 'PROBES CLEAN' : `PROBES: ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

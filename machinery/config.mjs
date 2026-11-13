@@ -382,6 +382,9 @@ export function wakePromptProblem(v) {
 const LANE_KEYS = {
   targetTokens: 'number', emergencyTargetTokens: 'number', contextWindow: 'number',
   switchboard: 'boolean', cwdMarker: 'string', runtime: 'string', modelName: 'string',
+  // An agent's chosen given name: display only (alert labels, card heading,
+  // strip and log labels). The lane KEY stays the routing/plumbing id.
+  given: 'string',
   // The pinned model id (exact, e.g. claude-opus-5-5): every wake passes it,
   // so the model never changes out from under the agent (Ra's ruling 2,
   // 10/6). modelName above stays the human-facing display label.
