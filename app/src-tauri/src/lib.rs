@@ -772,6 +772,37 @@ mod restart_tests {
     }
 }
 
+#[cfg(test)]
+mod terminal_script_tests {
+    use super::terminal_body;
+    // A bare `activate` (or `set index`) raises every Terminal window, not only
+    // this lane's: measured on macOS 26.5.2, unminimizing a window by itself
+    // raises that window alone. So a minimized window must come back by
+    // unminimizing and return before either runs.
+    #[test]
+    fn a_minimized_lane_window_comes_back_alone() {
+        let body = terminal_body("show");
+        assert!(body.starts_with("if miniaturized of w then"), "no minimized branch: {body}");
+        let branch = body.split("end if").next().unwrap();
+        assert!(branch.contains("set miniaturized of w to false") && branch.contains("return \"found\""), "{branch}");
+        assert!(!branch.contains("activate") && !branch.contains("set index"), "the minimized branch raises every window: {branch}");
+    }
+    // Nothing else brings a window that is open but buried above other apps.
+    #[test]
+    fn an_open_but_buried_window_is_still_raised() {
+        let body = terminal_body("show");
+        let rest = body.split("end if").nth(1).unwrap_or("");
+        assert!(rest.contains("set index of w to 1") && rest.contains("activate") && rest.contains("return \"found\""), "{body}");
+    }
+    #[test]
+    fn hide_and_state_never_activate() {
+        for verb in ["hide", "state"] {
+            let body = terminal_body(verb);
+            assert!(!body.contains("activate") && !body.contains("set index"), "{verb}: {body}");
+        }
+    }
+}
+
 // Keep on top is the viewer's choice (View menu), off unless they ask.
 #[tauri::command]
 fn set_on_top(app: AppHandle, on: bool) -> Result<(), String> {
@@ -809,10 +840,23 @@ fn lane_pid(h: &Hub, lane: &str) -> Option<u32> {
 
 // The lane's own Terminal tab, found by its tty (Ra, 10/7: "Bring terminal to
 // front" flips to "Hide terminal" while the window is showing). One script,
-// three verbs: show (un-minimize, select the tab, raise, activate), hide
-// (minimize its window) and state ("front", "open", "hidden" or "missing").
+// three verbs: show, hide (minimize its window) and state ("front", "open",
+// "hidden" or "missing"). Show un-minimizes a minimized window and selects the
+// tab, which raises that window alone; a window that is open but buried is also
+// raised and Terminal activated, which raises every Terminal window (no way to
+// raise one alone has been measured; a bare activate on a minimized window
+// brought every lane's terminal forward: Ra, 11/16).
 // Every verb checks that Terminal is running first: a state query must never
 // launch Terminal just to report that nothing is open.
+// What each verb does once the lane's tab is found (w = its window, t = the tab).
+fn terminal_body(verb: &str) -> &'static str {
+    match verb {
+        "show" => "if miniaturized of w then\n          set miniaturized of w to false\n          set selected of t to true\n          return \"found\"\n        end if\n        set selected of t to true\n        set index of w to 1\n        activate\n        return \"found\"",
+        "hide" => "set miniaturized of w to true\n        return \"found\"",
+        _ => "if miniaturized of w then return \"hidden\"\n        if frontmost and index of w is 1 then return \"front\"\n        return \"open\"",
+    }
+}
+
 fn lane_terminal(h: &Hub, lane: Option<&str>, verb: &str) -> Result<String, String> {
     let lane = h.check_lane(lane)?;
     // Not in HOST_CAN off macOS, so the page never asks; a caller that does
@@ -825,11 +869,7 @@ fn lane_terminal(h: &Hub, lane: Option<&str>, verb: &str) -> Result<String, Stri
     let out = Command::new("/bin/ps").args(["-p", &pid.to_string(), "-o", "tty="]).output().map_err(|e| e.to_string())?;
     let tty = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if tty.is_empty() || tty == "??" { return Err(format!("{lane}'s session has no terminal (pid {pid}).")); }
-    let body = match verb {
-        "show" => "set miniaturized of w to false\n        set selected of t to true\n        set index of w to 1\n        activate\n        return \"found\"",
-        "hide" => "set miniaturized of w to true\n        return \"found\"",
-        _ => "if miniaturized of w then return \"hidden\"\n        if frontmost and index of w is 1 then return \"front\"\n        return \"open\"",
-    };
+    let body = terminal_body(verb);
     let script = format!(r#"if application "Terminal" is not running then return "missing"
 tell application "Terminal"
   repeat with w in windows
