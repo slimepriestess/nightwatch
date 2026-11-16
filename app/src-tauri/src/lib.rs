@@ -772,6 +772,37 @@ mod restart_tests {
     }
 }
 
+#[cfg(test)]
+mod terminal_script_tests {
+    use super::terminal_body;
+    // A bare `activate` (or `set index`) raises every Terminal window, not only
+    // this lane's: measured on macOS 26.5.2, unminimizing a window by itself
+    // raises that window alone. So a minimized window must come back by
+    // unminimizing and return before either runs.
+    #[test]
+    fn a_minimized_lane_window_comes_back_alone() {
+        let body = terminal_body("show");
+        assert!(body.starts_with("if miniaturized of w then"), "no minimized branch: {body}");
+        let branch = body.split("end if").next().unwrap();
+        assert!(branch.contains("set miniaturized of w to false") && branch.contains("return \"found\""), "{branch}");
+        assert!(!branch.contains("activate") && !branch.contains("set index"), "the minimized branch raises every window: {branch}");
+    }
+    // Nothing else brings a window that is open but buried above other apps.
+    #[test]
+    fn an_open_but_buried_window_is_still_raised() {
+        let body = terminal_body("show");
+        let rest = body.split("end if").nth(1).unwrap_or("");
+        assert!(rest.contains("set index of w to 1") && rest.contains("activate") && rest.contains("return \"found\""), "{body}");
+    }
+    #[test]
+    fn hide_and_state_never_activate() {
+        for verb in ["hide", "state"] {
+            let body = terminal_body(verb);
+            assert!(!body.contains("activate") && !body.contains("set index"), "{verb}: {body}");
+        }
+    }
+}
+
 // Keep on top is the viewer's choice (View menu), off unless they ask.
 #[tauri::command]
 fn set_on_top(app: AppHandle, on: bool) -> Result<(), String> {
