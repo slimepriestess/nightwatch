@@ -813,6 +813,15 @@ fn lane_pid(h: &Hub, lane: &str) -> Option<u32> {
 // (minimize its window) and state ("front", "open", "hidden" or "missing").
 // Every verb checks that Terminal is running first: a state query must never
 // launch Terminal just to report that nothing is open.
+// What each verb does once the lane's tab is found (w = its window, t = the tab).
+fn terminal_body(verb: &str) -> &'static str {
+    match verb {
+        "show" => "set miniaturized of w to false\n        set selected of t to true\n        set index of w to 1\n        activate\n        return \"found\"",
+        "hide" => "set miniaturized of w to true\n        return \"found\"",
+        _ => "if miniaturized of w then return \"hidden\"\n        if frontmost and index of w is 1 then return \"front\"\n        return \"open\"",
+    }
+}
+
 fn lane_terminal(h: &Hub, lane: Option<&str>, verb: &str) -> Result<String, String> {
     let lane = h.check_lane(lane)?;
     // Not in HOST_CAN off macOS, so the page never asks; a caller that does
@@ -825,11 +834,7 @@ fn lane_terminal(h: &Hub, lane: Option<&str>, verb: &str) -> Result<String, Stri
     let out = Command::new("/bin/ps").args(["-p", &pid.to_string(), "-o", "tty="]).output().map_err(|e| e.to_string())?;
     let tty = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if tty.is_empty() || tty == "??" { return Err(format!("{lane}'s session has no terminal (pid {pid}).")); }
-    let body = match verb {
-        "show" => "set miniaturized of w to false\n        set selected of t to true\n        set index of w to 1\n        activate\n        return \"found\"",
-        "hide" => "set miniaturized of w to true\n        return \"found\"",
-        _ => "if miniaturized of w then return \"hidden\"\n        if frontmost and index of w is 1 then return \"front\"\n        return \"open\"",
-    };
+    let body = terminal_body(verb);
     let script = format!(r#"if application "Terminal" is not running then return "missing"
 tell application "Terminal"
   repeat with w in windows
