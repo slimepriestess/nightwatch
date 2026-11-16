@@ -840,14 +840,18 @@ fn lane_pid(h: &Hub, lane: &str) -> Option<u32> {
 
 // The lane's own Terminal tab, found by its tty (Ra, 10/7: "Bring terminal to
 // front" flips to "Hide terminal" while the window is showing). One script,
-// three verbs: show (un-minimize, select the tab, raise, activate), hide
-// (minimize its window) and state ("front", "open", "hidden" or "missing").
+// three verbs: show, hide (minimize its window) and state ("front", "open",
+// "hidden" or "missing"). Show un-minimizes a minimized window and selects the
+// tab, which raises that window alone; a window that is open but buried is also
+// raised and Terminal activated, which raises every Terminal window (no way to
+// raise one alone has been measured; a bare activate on a minimized window
+// brought every lane's terminal forward: Ra, 11/16).
 // Every verb checks that Terminal is running first: a state query must never
 // launch Terminal just to report that nothing is open.
 // What each verb does once the lane's tab is found (w = its window, t = the tab).
 fn terminal_body(verb: &str) -> &'static str {
     match verb {
-        "show" => "set miniaturized of w to false\n        set selected of t to true\n        set index of w to 1\n        activate\n        return \"found\"",
+        "show" => "if miniaturized of w then\n          set miniaturized of w to false\n          set selected of t to true\n          return \"found\"\n        end if\n        set selected of t to true\n        set index of w to 1\n        activate\n        return \"found\"",
         "hide" => "set miniaturized of w to true\n        return \"found\"",
         _ => "if miniaturized of w then return \"hidden\"\n        if frontmost and index of w is 1 then return \"front\"\n        return \"open\"",
     }
