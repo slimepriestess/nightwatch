@@ -26,7 +26,7 @@ export const FIXTURE = {
   // Per-lane targets mirror weft.config.json (lanes.<name>.targetTokens).
   LANES: [
     { id: 'fable', activity: 'working', model: 'Fable 5', modelId: 'claude-fable-5', role: 'switchboard', state: 'awake',
-      persona: { id: 'weft', name: 'Weft' }, runtime: 'claude-code', schedule: { inherit: true, sleep: '02:00', wake: '08:00' },
+      persona: { id: 'weft', name: 'Weft', usage: { provider: 'anthropic', at: '2026-10-05T20:08:00.000Z', stale: false, model: 'claude-fable-5', windows: [{ key: 'five_hour', pct: 42, resetsAt: '2026-10-05T22:30:00.000Z', expired: false }, { key: 'seven_day', pct: 63, resetsAt: '2026-10-09T16:00:00.000Z', expired: false }] } }, runtime: 'claude-code', schedule: { inherit: true, sleep: '02:00', wake: '08:00' },
       session: '94914e2c', since: ['2026-10-05T09:02-07:00', '09:02'], next: ['bell', '2026-10-06T02:00-07:00', '12h 50m'],
       ctx: 212_000, target: 250_000, open: true,
       series: [0, 0, 0, 0, 0, 0, 0, 49903, 18641, 41302, 5642, 30905, 58099, 5053, 40245, 39060, 39117, 1666, 5902, 64976, 5082, 29230, 25912, 4840] },

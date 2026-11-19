@@ -268,6 +268,61 @@ function fold_request(L, nowIso) {
     + `<span>Folded${fr.forced ? ' (forced)' : ''} · waking fresh</span></li>`;
 }
 
+// Plan usage on the persona card (Ra, 11/19): one bar per window the plan
+// reports (5-hour, weekly, a spend limit, or any window Claude Code adds
+// later), one showing at a time; its label flips to the next. The data is
+// account-wide, so it lives on the persona, not a lane. Nothing is drawn
+// without data: no tee file means no usage block, not an empty bar. A window
+// whose reset has passed claims nothing ("reset"), and a stale reading (the
+// tee writes only while a session runs) says how old it is. A Fable window,
+// if one ever appears, carries data-fable so the Settings toggle can hide it.
+const USAGE_NAMES = { five_hour: ['5h', '5-hour'], seven_day: ['Wk', 'Weekly'], spend_limit: ['$', 'Spend'] };
+function usage_when(iso, nowIso, tz) {
+  // The reset as the clock will read it: HH:MM, with the day when it's more
+  // than a day out (a weekly window).
+  const far = Date.parse(iso) - Date.parse(nowIso) > 24 * 3600_000;
+  return far ? `${new Intl.DateTimeFormat('en-GB', { weekday: 'short', timeZone: tz }).format(new Date(iso))} ${hmLocal(iso, tz)}` : hmLocal(iso, tz);
+}
+// The time to a reset: like a countdown, but in days once it's a day or
+// more out (a weekly window reads "3d 19h", not "91h 50m"). The runtime ticks
+// time[data-part="usage-reset"] with the same rule.
+function usage_in(ms) {
+  if (!(ms > 0)) return 'now';
+  const m = pyRound(ms / 60000), h = Math.floor(m / 60);
+  if (h >= 24) return `${Math.floor(h / 24)}d ${h % 24}h`;
+  return h ? `${h}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
+function persona_usage(u, nowIso, tz) {
+  if (!u || !Array.isArray(u.windows) || u.windows.length === 0) return '';
+  const multi = u.windows.length > 1;
+  const stale = u.stale
+    ? (u.at ? ` Last read ${hmLocal(u.at, tz)}, ${elapsed(u.at, nowIso)} ago:` : ' Never read:') + ' Nightwatch hears the plan only while a session is running, so it may have moved since.'
+    : '';
+  const wins = u.windows.map((w, i) => {
+    const nice = w.key.replace(/_/g, ' '), named = nice.charAt(0).toUpperCase() + nice.slice(1);
+    const [short, long] = USAGE_NAMES[w.key] ?? [named, named];
+    const left = w.resetsAt ? usage_in(Date.parse(w.resetsAt) - Date.parse(nowIso)) : '';
+    const pct = typeof w.pct === 'number' ? w.pct : null;
+    const blank = w.expired || pct === null;
+    const level = blank ? 'none' : pct >= 100 ? 'over' : pct >= 80 ? 'high' : 'ok';
+    const fill = blank ? 0 : Math.min(Math.max(pct, 0) / 100, 1);
+    const value = w.expired ? 'reset' : pct === null ? '—' : `${pyRound(pct)}%`;
+    const usd = typeof w.usedUsd === 'number' && typeof w.limitUsd === 'number'
+      ? ` ($${pyFixed(w.usedUsd, 2)} of $${pyFixed(w.limitUsd, 2)}${w.period ? ` per ${w.period}` : ''})` : '';
+    const tip = w.expired
+      ? `${long}: reset${w.resetsAt ? ` at ${usage_when(w.resetsAt, nowIso, tz)}` : ''}. No reading since; the next session brings one.`
+      : `${long}: ${pct === null ? 'no percentage reported' : `${value} used`}${usd}${w.resetsAt ? `. Resets ${usage_when(w.resetsAt, nowIso, tz)}, in ${left}.` : '.'}`;
+    const label = multi
+      ? `<button type="button" data-part="usage-label" data-action="flip-usage" aria-label="${esc(long)}: show the next window">${esc(short)}</button>`
+      : `<span data-part="usage-label">${esc(short)}</span>`;
+    const cd = !w.expired && w.resetsAt ? `<time data-part="usage-reset" datetime="${esc(w.resetsAt)}">${left}</time>` : '';
+    return `<div data-part="usage-window" data-window="${esc(w.key)}" data-current="${i === 0}" data-level="${level}"` +
+      `${w.expired ? ' data-expired="true"' : ''}${/fable/i.test(w.key) ? ' data-fable="true"' : ''} style="--fill: ${pyFixed(fill, 3)}" data-tip="${esc(tip + stale)}">` +
+      `${label}<span data-part="bar" role="meter" aria-label="${esc(long)} usage" aria-valuenow="${pyFixed(fill, 2)}"></span><span data-part="value">${value}</span>${cd}</div>`;
+  }).join('');
+  return `<div data-part="usage" data-provider="${esc(u.provider ?? 'anthropic')}" data-stale="${!!u.stale}">${wins}</div>`;
+}
+
 // Persona rows (Ra, 10/7): the lanes are grouped by persona, each group with
 // its name and its own Add agent slot, in the order the personas first appear.
 // A skin decides where the name sits (a gutter inside the app's edge, or a tab
@@ -298,7 +353,7 @@ function persona_groups(ctx) {
       `<h2 data-part="persona-name" data-action="toggle-persona-card" aria-expanded="true">` +
       `<span data-part="persona-avatar" aria-hidden="true">${esc(p.name.charAt(0).toUpperCase())}</span>` +
       `<span data-part="label">${nm}</span><span data-part="persona-toggle" aria-hidden="true">${icon('chev')}</span></h2>` +
-      `<div data-part="persona-body"><ul data-part="persona-agents" aria-label="${nm}'s agents">${dots}</ul>` +
+      `<div data-part="persona-body"><ul data-part="persona-agents" aria-label="${nm}'s agents">${dots}</ul>${persona_usage(p.usage, ctx.NOW, ctx.TZ)}` +
       `<div data-part="persona-buttons"><button type="button" data-action="toggle-persona" data-part="show-agents" aria-pressed="true" aria-label="Hide agents" data-tip="Show or hide ${nm}'s agent cards">${icon('eye')}${icon('eye-off')}</button>` +
       `<button type="button" data-action="persona-settings" aria-label="Persona settings" data-tip="${nm}'s settings">${icon('gear')}</button></div></div></article>` +
       lanes.map((L) => lane_card(L, ctx.NOW, ctx.TZ)).join('') + add_slot(false, ctx.SCHEDULE, 'form', [], p.id) + '</section>';
@@ -846,6 +901,7 @@ function app_menu() {
       <li role="none" data-part="settings-entry"><button type="button" role="menuitem" data-action="app-settings">${icon('gear')}<span>Schedule and health check…</span></button></li>
       <li role="separator" data-part="settings-entry"></li>
       <li role="none"><label role="menuitemcheckbox" data-view="on-top"><input type="checkbox" data-view-toggle="on-top">${icon('pin')}<span>Keep on top</span></label></li>
+      <li role="none"><label role="menuitemcheckbox" data-view="fable-usage" data-tip="Show a Fable usage window on the persona card when the plan reports one"><input type="checkbox" data-view-toggle="fable-usage" checked>${icon('eye')}<span>Show Fable usage</span></label></li>
     </menu>`;
 }
 
@@ -1092,7 +1148,7 @@ export function renderPage(snap) {
 </head>
 <body>
 ${sprite()}
-<div class="nw-app" data-show-controls="true" data-show-timeline="true" data-show-log="true" data-timeline-mode="expanded" data-layout="row">
+<div class="nw-app" data-show-controls="true" data-show-timeline="true" data-show-log="true" data-show-fable-usage="true" data-timeline-mode="expanded" data-layout="row">
   <header class="nw-head" data-tauri-drag-region>
     <span class="nw-glyph" data-phase="${ctx.DAEMON.phase}" role="img" aria-label="${ALARM_ARIA[ctx.DAEMON.phase]}" data-tip="${glyph_tip(ctx)}"></span>
     <h1 data-part="title">Nightwatch</h1>

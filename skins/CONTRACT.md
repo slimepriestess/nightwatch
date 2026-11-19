@@ -441,3 +441,39 @@ Written by: claude-opus-5-5, 2026-10-05 (v0.1–v0.4)
   fits all six in every skin; Horizontal fits four or five on the first line. Toggle buttons
   carry `data-tip-on` and `data-tip-off`, and the runtime keeps `data-tip` in step with `aria-pressed`
   (Nightly: "Nightly cycle is on: … Press to turn it off.").
+
+## v0.17: plan usage on the persona card (Ra, 11/19)
+
+- **Data.** `persona.usage` (assembled by gui/assemble.mjs from machinery/usage-tee.mjs's file; absent when there is
+  no tee file, which is every install until the statusLine entry is placed): `{provider, at, stale, model,
+  windows: [{key, pct, resetsAt, expired, usedUsd?, limitUsd?, period?}]}`, windows in canonical order (`five_hour`,
+  `seven_day`, `spend_limit`, then anything else by key). The usage is the account's, so it rides the persona;
+  hubs.mjs spreads it into every lane's persona.
+- **Markup.** In `[data-part="persona-body"]`, between the agent lights and the buttons:
+  `div[data-part="usage"][data-provider][data-stale]` holding one `div[data-part="usage-window"]` per window, with
+  `data-window` (the key), `data-current` (exactly one is `true`), `data-level` (`ok`, `high` at 80%, `over` at
+  100%, `none` when expired or with no percentage), `data-expired`, `data-fable` (a key matching /fable/i) and
+  `--fill` (0..1). Inside: the label (`button[data-part="usage-label"][data-action="flip-usage"]` when there is more
+  than one window, else a `span`: "5h", "Wk", "$", or the key humanized), `span[data-part="bar"][role="meter"]`,
+  `span[data-part="value"]` ("42%", "reset" or "—") and `time[data-part="usage-reset"][datetime]` (the time to the
+  reset, in days once it's a day out: "3d 19h"). Each window's `data-tip` says what it is, when it resets, and, when
+  `stale`, when it was last read and why it may have moved. No data means no `[data-part="usage"]` at all, never an
+  empty bar.
+- **No separate Fable pool is drawn.** On Max-style plans Fable draws the same weekly limit (faster, capped at half
+  of it); there's no Fable window in Claude Code's data today. A window whose key names Fable is drawn like any
+  other and carries `data-fable`. The Settings menu's `label[data-view="fable-usage"] >
+  input[data-view-toggle="fable-usage"]` (default on) sets `.nw-app[data-show-fable-usage]`; skins hide
+  `[data-fable="true"]` windows when it's `false`.
+- **Runtime.** The label flips to the next shown window (focus follows); the choice is remembered per persona
+  (`state.usage`) and put back after every refresh; hiding Fable moves a card off a Fable window and flipping skips
+  it. `time[data-part="usage-reset"]` ticks with the others.
+- **Skins.** Minimal draws it in the context meter's language, in the plan's own colours (blue, amber at 80%, red at
+  the limit; never the persona's state colour, which can be red for an unrelated failed lane), dims a stale block,
+  and leaves an expired window's track empty. In the Horizontal spine (Ra, 11/19: it must never lengthen the
+  column past the cards) the bar curls into a 22px ring under the agent lights (her placement); the label in its
+  centre is the flip button, and the percentage and the reset time move to the tip. A spine is as tall as its row's
+  tallest card, so the ring costs nothing while any card in the row is open (Weft's spine needs 163px; its shortest
+  open card is 178px). With every card in a row folded, the row grows by the ring: 38px for Weft, 23 to 33px for a
+  one-agent persona. The spines keep their width in every skin.
+  Glass, Amber, Metal, Brassworks and Concrete take it through build_skins.py. Moonlamp hides persona cards, so it
+  shows no usage.
