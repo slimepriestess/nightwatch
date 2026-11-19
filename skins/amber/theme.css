@@ -221,3 +221,6 @@ input[type="checkbox"] { accent-color: #8a8272; }
 .nw-persona [data-part="persona-agents"] li { width: 7px; height: 7px; border-radius: 1px; box-shadow: 0 0 6px var(--state); }
 .nw-persona [data-part="persona-agents"] li[data-state="sleeping"] { box-shadow: none; }
 .nw-persona [data-part="persona-body"] { --nw-persona-tray: rgb(0 0 0 / .28); }
+
+/* Plan usage (11/19 round 4): the spine's ring glows the way this skin's lane meters do. */
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--meter) 55%, transparent)); }
