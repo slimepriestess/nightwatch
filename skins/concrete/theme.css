@@ -284,6 +284,3 @@ body { color: var(--nw-ink); font-family: var(--nw-font); }
    over is solid red; the hazard stripes still mark the cards and the alert. */
 .nw-lane [data-part="context"][data-level="high"] [data-part="bar"]::before { background: var(--cc-yellow); }
 .nw-lane [data-part="context"][data-level="over"] [data-part="bar"]::before { background: var(--cc-red); }
-
-/* Plan usage (11/19): the ring sits beside the lights in the spine; this skin's wider name column needs more room for it. */
-.nw-app:has([data-part="usage"]) { --nw-usage-gutter: 25px; }

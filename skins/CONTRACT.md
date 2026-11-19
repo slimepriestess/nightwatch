@@ -470,9 +470,10 @@ Written by: claude-opus-5-5, 2026-10-05 (v0.1–v0.4)
 - **Skins.** Minimal draws it in the context meter's language, in the plan's own colours (blue, amber at 80%, red at
   the limit; never the persona's state colour, which can be red for an unrelated failed lane), dims a stale block,
   and leaves an expired window's track empty. In the Horizontal spine (Ra, 11/19: it must never lengthen the
-  column past the cards) the bar curls into a 22px ring beside the agent lights, centred on the first light; the label
-  in its centre is the flip button, and the percentage and the reset time move to the tip. The spine widens by
-  `--nw-usage-gutter` (12px; Concrete 25px) only while some persona shows usage; Glass's hanging tab grows on its
-  own. Measured with every card folded, the ring adds 0px to any persona row in Minimal, Glass, Amber and Concrete.
+  column past the cards) the bar curls into a 22px ring under the agent lights (her placement); the label in its
+  centre is the flip button, and the percentage and the reset time move to the tip. A spine is as tall as its row's
+  tallest card, so the ring costs nothing while any card in the row is open (Weft's spine needs 163px; its shortest
+  open card is 178px). With every card in a row folded, the row grows by the ring: 38px for Weft, 23 to 33px for a
+  one-agent persona. The spines keep their width in every skin.
   Glass, Amber, Metal, Brassworks and Concrete take it through build_skins.py. Moonlamp hides persona cards, so it
   shows no usage.
