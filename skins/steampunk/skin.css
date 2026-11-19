@@ -739,6 +739,35 @@ html[data-gallery="1"] .nw-gallery { grid-area: gallery; display: grid; grid-tem
 :is(.nw-app[data-layout="column"], .nw-app[data-layout="stack"], html[data-surface="popover"] .nw-app) [data-part="persona-card"] > [data-part="persona-name"] > [data-part="persona-toggle"] { margin-left: auto; }
 :is(.nw-app[data-layout="column"], .nw-app[data-layout="stack"], html[data-surface="popover"] .nw-app) [data-part="persona-body"] { padding: 7px 6px 7px 12px; border-top: 1px solid var(--nw-seam); }
 
+/* Plan usage on the persona card (11/19): one window at a time (5-hour, weekly, spend…), its label flips to the next.
+   A meter in the context bar's language, in the plan's own colour (never the persona's state colour, which may be red
+   for an unrelated failed lane): blue, amber at 80%, red at the limit. A window whose reset has passed, or that reports
+   no percentage, draws an empty track; a stale reading (the tee only writes while a session runs) dims the whole block. */
+[data-part="usage"] { --meter: var(--nw-awake); flex: 1 1 auto; min-width: 0; display: flex; }
+[data-part="usage"][data-stale="true"] { opacity: .55; }
+[data-part="usage-window"] { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: auto minmax(36px, 1fr) auto auto; align-items: center; gap: 6px; color: var(--nw-ink-2); }
+[data-part="usage-window"]:not([data-current="true"]),
+.nw-app[data-show-fable-usage="false"] [data-part="usage-window"][data-fable="true"] { display: none; }
+[data-part="usage-window"][data-level="high"] { --meter: var(--nw-warn); color: var(--nw-warn); }
+[data-part="usage-window"][data-level="over"] { --meter: var(--nw-failed); color: var(--nw-failed); }
+[data-part="usage-window"] [data-part="usage-label"] { font: 600 10px var(--nw-mono); letter-spacing: .04em; padding: 2px 5px; border: 0; border-radius: 5px;
+  background: none; color: var(--nw-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 9ch; }
+[data-part="usage-window"] button[data-part="usage-label"] { cursor: pointer; background: color-mix(in srgb, var(--nw-ink) 7%, transparent); }
+[data-part="usage-window"] button[data-part="usage-label"]:hover { color: var(--nw-ink); background: var(--nw-hover); }
+[data-part="usage-window"] [data-part="bar"] { position: relative; height: 10px; border-radius: 4px; background: var(--nw-sunk); box-shadow: inset 0 0 0 1px var(--nw-seam); overflow: hidden; }
+[data-part="usage-window"] [data-part="bar"]::before { content: ""; position: absolute; inset: 2px auto 2px 2px; border-radius: 2px; width: calc(var(--fill) * (100% - 4px)); background: var(--meter); }
+[data-part="usage-window"] [data-part="value"] { font: 11px var(--nw-mono); white-space: nowrap; }
+[data-part="usage-window"] [data-part="usage-reset"] { font: 10px var(--nw-mono); white-space: nowrap; opacity: .75; }
+:is([data-part="usage-window"][data-expired="true"], [data-part="usage-window"][data-level="none"]) [data-part="value"] { font-style: italic; opacity: .7; }
+/* Horizontal: the persona card is a narrow spine, so the meter stands up and fills from the bottom. */
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage"] { flex: 1 0 auto; max-height: 180px; justify-content: center; margin: 8px 0; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(64px, 1fr) auto auto; justify-items: center; gap: 4px; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="usage-label"] { max-width: 100%; padding: 2px 4px; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"] { width: 10px; height: 100%; min-height: 0; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"]::before { inset: auto 2px 2px 2px; width: auto; height: calc(var(--fill) * (100% - 4px)); }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="value"] { font-size: 10px; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="usage-reset"] { font-size: 9px; white-space: normal; text-align: center; line-height: 1.15; }
+
 /* Add persona: a small floating + after the last persona (right of it in Vertical, below it in Horizontal) */
 .nw-add-persona { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
   background: var(--nw-surface); color: var(--nw-ink-2); box-shadow: 0 2px 6px rgb(0 0 0 / .22), inset 0 0 0 1px var(--nw-seam); }

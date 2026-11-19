@@ -112,6 +112,24 @@ const CASES = {
     LOG: [['Oct 5', [['06:10', L[0].id, 'context', 'warn', 'Context high, 88%', null, 1], ...(FIXTURE.LOG[0]?.[1] ?? [])]], ...FIXTURE.LOG.slice(1)],
     } };
   },
+  // Plan usage (Ra, 11/19): every state the card draws. Weft's reading is
+  // stale with an expired 5-hour window, a weekly window over its limit, a
+  // spend window with dollars, a window with no percentage, an unknown key
+  // and a Fable key; Lark's plan reports one window (no flip button).
+  usage: () => {
+    const L = FIXTURE.LANES;
+    const weft = { id: 'weft', name: 'Weft', usage: { provider: 'anthropic', at: '2026-10-05T16:40:00.000Z', stale: true, model: 'claude-fable-5', windows: [
+      { key: 'five_hour', pct: 97, resetsAt: '2026-10-05T18:00:00.000Z', expired: true },
+      { key: 'seven_day', pct: 100.4, resetsAt: '2026-10-07T16:00:00.000Z', expired: false },
+      { key: 'spend_limit', pct: 81.5, resetsAt: '2026-11-01T07:00:00.000Z', expired: false, usedUsd: 40.75, limitUsd: 50, period: 'month' },
+      { key: 'fable_week', pct: 12, resetsAt: '2026-10-07T16:00:00.000Z', expired: false },
+      { key: 'some_new_window', pct: null, resetsAt: null, expired: false },
+    ] } };
+    const lark = { id: 'lark', name: 'Lark', usage: { provider: 'anthropic', at: '2026-10-05T20:09:30.000Z', stale: false, model: 'claude-haiku-4-5', windows: [
+      { key: 'five_hour', pct: 3, resetsAt: '2026-10-05T21:15:00.000Z', expired: false },
+    ] } };
+    return { snap: { LANES: L.map((x) => ({ ...x, persona: x.persona.id === 'lark' ? lark : weft })) } };
+  },
   quiet: () => ({
     snap: {
       NOW: '2026-10-06T08:05-07:00',

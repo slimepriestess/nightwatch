@@ -267,13 +267,31 @@
   }
 
   // ---------------------------------------------------------------- view
-  const VIEW_ATTR = { controls: 'showControls', timeline: 'showTimeline', log: 'showLog', 'log-tall': 'logTall' };
+  const VIEW_ATTR = { controls: 'showControls', timeline: 'showTimeline', log: 'showLog', 'log-tall': 'logTall', 'fable-usage': 'showFableUsage' };
   function setView(view, on, persist = true) {
     const a = app(); if (!a || !(view in VIEW_ATTR)) return;
     a.dataset[VIEW_ATTR[view]] = String(on);
     const box = $(`[data-view-toggle="${view}"]`); if (box) box.checked = on;
     if (view === 'log' || view === 'timeline') $$(`.nw-controls [data-action="toggle-${view}"]`).forEach((b) => b.setAttribute('aria-pressed', String(on)));
+    if (view === 'fable-usage') syncUsage();
     if (persist) { (state.view ??= {})[view] = on; save(); }
+  }
+
+  // Plan usage on the persona card (11/19): one window shows at a time and its
+  // label flips to the next. The choice is remembered per persona; a window
+  // that disappears (a refresh without it, or a Fable window the Settings
+  // toggle hides) hands over to the first one still shown.
+  const usageShown = (g) => $$('[data-part="usage"] > [data-part="usage-window"]', g)
+    .filter((w) => !(w.dataset.fable === 'true' && app()?.dataset.showFableUsage === 'false'));
+  function setUsage(g, key, persist = true) {
+    const shown = usageShown(g); if (!shown.length) return;
+    const pick = shown.find((w) => w.dataset.window === key) ?? shown[0];
+    for (const w of $$('[data-part="usage"] > [data-part="usage-window"]', g)) w.dataset.current = String(w === pick);
+    if (persist) { (state.usage ??= {})[g.dataset.persona] = pick.dataset.window; save(); }
+    return pick;
+  }
+  function syncUsage() {
+    for (const g of $$('.nw-persona')) if ($('[data-part="usage"]', g)) setUsage(g, state.usage?.[g.dataset.persona] ?? $('[data-part="usage-window"][data-current="true"]', g)?.dataset.window, false);
   }
   function setRadio(group, value, persist = true) {
     const a = app(); if (!a) return;
@@ -424,8 +442,17 @@
     const m = Math.round(ms / 60000), h = Math.floor(m / 60);
     return h ? `${h}h ${pad(m % 60)}m` : `${m}m`;
   }
+  function usageIn(ms) {
+    if (ms <= 0) return 'now';
+    const m = Math.round(ms / 60000), h = Math.floor(m / 60);
+    return h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h ? `${h}h ${pad(m % 60)}m` : `${m}m`;
+  }
   function tick() {
     if (!SERVED) return;
+    for (const c of $$('time[data-part="usage-reset"][datetime]')) {
+      const t = Date.parse(c.getAttribute('datetime'));
+      if (!Number.isNaN(t)) c.textContent = usageIn(t - Date.now());
+    }
     const now = new Date();
     for (const c of $$('time[data-part="clock"]')) { c.textContent = hhmm(now); c.setAttribute('datetime', now.toISOString()); }
     for (const c of $$('time[data-part="countdown"][datetime]')) {
@@ -511,6 +538,7 @@
       else if (state.personas && g.dataset.persona in state.personas) setPersonaOpen(g, state.personas[g.dataset.persona], false);
       if (state.personaCards && g.dataset.persona in state.personaCards) setPersonaCardOpen(g, state.personaCards[g.dataset.persona], false);
     }
+    syncUsage();
     // A restart serves the default range while the buttons remember the saved
     // one (Ra, 10/7: "24h" lit over an 8h timeline until clicked). If what was
     // served isn't what's remembered, fetch the remembered range once.
@@ -589,6 +617,13 @@
       case 'toggle-persona-card': {
         const g = btn.closest('.nw-persona'); const c = g && $(':scope > [data-part="persona-card"]', g);
         if (c) setPersonaCardOpen(g, c.dataset.cardOpen !== 'true');
+        break;
+      }
+      case 'flip-usage': {
+        const g = btn.closest('.nw-persona'); if (!g) break;
+        const shown = usageShown(g), at = shown.indexOf(btn.closest('[data-part="usage-window"]'));
+        const next = shown[(at + 1) % shown.length];
+        if (next) { setUsage(g, next.dataset.window); $('[data-part="usage-label"]', next)?.focus?.(); }
         break;
       }
       case 'toggle-persona': {

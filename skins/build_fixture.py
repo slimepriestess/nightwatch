@@ -134,7 +134,7 @@ def k1(n):
 # Per-lane targets mirror weft.config.json (lanes.<name>.targetTokens).
 LANES = [
     dict(id="fable", activity="working", model="Fable 5", modelId="claude-fable-5", role="switchboard", state="awake",
-         persona=dict(id="weft", name="Weft"), runtime="claude-code", schedule=dict(inherit=True, sleep="02:00", wake="08:00"),
+         persona=dict(id="weft", name="Weft", usage=dict(provider="anthropic", at="2026-10-05T20:08:00.000Z", stale=False, model="claude-fable-5", windows=[dict(key="five_hour", pct=42, resetsAt="2026-10-05T22:30:00.000Z", expired=False), dict(key="seven_day", pct=63, resetsAt="2026-10-09T16:00:00.000Z", expired=False)])), runtime="claude-code", schedule=dict(inherit=True, sleep="02:00", wake="08:00"),
          session="94914e2c", since=("2026-10-05T09:02-07:00", "09:02"), next=("bell", "2026-10-06T02:00-07:00", "12h 50m"),
          ctx=212_000, target=250_000, open=True,
          series=[0,0,0,0,0,0,0,49903,18641,41302,5642,30905,58099,5053,40245,39060,39117,1666,5902,64976,5082,29230,25912,4840]),
@@ -285,6 +285,73 @@ def fold_request(L):
     return (f'<li data-part="fold-request" data-phase="refreshing" data-tip="{what}: folded; the window closes and a fresh one opens">{icon("fold")}'
             f'<span>Folded{" (forced)" if fr.get("forced") else ""} · waking fresh</span></li>')
 
+# Plan usage on the persona card (Ra, 11/19): one bar per window the plan
+# reports (5-hour, weekly, a spend limit, or any window Claude Code adds
+# later), one showing at a time; its label flips to the next. The data is
+# account-wide, so it lives on the persona, not a lane. Nothing is drawn
+# without data: no tee file means no usage block, not an empty bar. A window
+# whose reset has passed claims nothing ("reset"), and a stale reading (the
+# tee writes only while a session runs) says how old it is. A Fable window,
+# if one ever appears, carries data-fable so the Settings toggle can hide it.
+USAGE_NAMES = {"five_hour": ("5h", "5-hour"), "seven_day": ("Wk", "Weekly"), "spend_limit": ("$", "Spend")}
+def usage_when(iso, now_iso):
+    # The reset as the clock will read it: HH:MM, with the day when it's more
+    # than a day out (a weekly window).
+    from datetime import datetime
+    far = (datetime.fromisoformat(iso) - datetime.fromisoformat(now_iso)).total_seconds() > 24 * 3600
+    t = local(iso)
+    return f'{t.strftime("%a")} {t.strftime("%H:%M")}' if far else t.strftime("%H:%M")
+
+# The time to a reset: like a countdown, but in days once it's a day or
+# more out (a weekly window reads "3d 19h", not "91h 50m"). The runtime ticks
+# time[data-part="usage-reset"] with the same rule.
+def usage_in(ms):
+    if not ms > 0:
+        return "now"
+    m = round(ms / 60000); h = m // 60
+    if h >= 24:
+        return f"{h // 24}d {h % 24}h"
+    return f"{h}h {m % 60:02d}m" if h else f"{m}m"
+
+def persona_usage(u, now_iso):
+    import re
+    if not u or not isinstance(u.get("windows"), list) or not u["windows"]:
+        return ""
+    wins_in = u["windows"]
+    multi = len(wins_in) > 1
+    stale = ""
+    if u.get("stale"):
+        stale = ((f' Last read {local(u["at"]).strftime("%H:%M")}, {elapsed(u["at"], now_iso)} ago:' if u.get("at") else " Never read:")
+                 + " Nightwatch hears the plan only while a session is running, so it may have moved since.")
+    isnum = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    out = ""
+    for i, w in enumerate(wins_in):
+        nice = w["key"].replace("_", " "); named = nice[:1].upper() + nice[1:]
+        short, long = USAGE_NAMES.get(w["key"], (named, named))
+        pct = w.get("pct") if isnum(w.get("pct")) else None
+        blank = bool(w.get("expired")) or pct is None
+        level = "none" if blank else "over" if pct >= 100 else "high" if pct >= 80 else "ok"
+        fill = 0 if blank else min(max(pct, 0) / 100, 1)
+        value = "reset" if w.get("expired") else "—" if pct is None else f"{round(pct)}%"
+        usd = ""
+        if isnum(w.get("usedUsd")) and isnum(w.get("limitUsd")):
+            usd = f' (${w["usedUsd"]:.2f} of ${w["limitUsd"]:.2f}' + (f' per {w["period"]}' if w.get("period") else "") + ")"
+        resets = w.get("resetsAt")
+        from datetime import datetime
+        left = usage_in((datetime.fromisoformat(resets) - datetime.fromisoformat(now_iso)).total_seconds() * 1000) if resets else ""
+        if w.get("expired"):
+            tip = f"{long}: reset" + (f" at {usage_when(resets, now_iso)}" if resets else "") + ". No reading since; the next session brings one."
+        else:
+            tip = f"{long}: " + ("no percentage reported" if pct is None else f"{value} used") + usd + (f". Resets {usage_when(resets, now_iso)}, in {left}." if resets else ".")
+        label = (f'<button type="button" data-part="usage-label" data-action="flip-usage" aria-label="{esc(long)}: show the next window">{esc(short)}</button>'
+                 if multi else f'<span data-part="usage-label">{esc(short)}</span>')
+        cd = f'<time data-part="usage-reset" datetime="{esc(resets)}">{left}</time>' if not w.get("expired") and resets else ""
+        out += (f'<div data-part="usage-window" data-window="{esc(w["key"])}" data-current="{"true" if i == 0 else "false"}" data-level="{level}"'
+                + (' data-expired="true"' if w.get("expired") else "") + (' data-fable="true"' if re.search("fable", w["key"], re.I) else "")
+                + f' style="--fill: {fill:.3f}" data-tip="{esc(tip + stale)}">'
+                + f'{label}<span data-part="bar" role="meter" aria-label="{esc(long)} usage" aria-valuenow="{fill:.2f}"></span><span data-part="value">{value}</span>{cd}</div>')
+    return f'<div data-part="usage" data-provider="{esc(u.get("provider") or "anthropic")}" data-stale="{"true" if u.get("stale") else "false"}">{out}</div>'
+
 # Persona rows (Ra, 10/7): the lanes are grouped by persona, each group with
 # its name and its own Add agent slot, in the order the personas first appear.
 # A skin decides where the name sits (a gutter inside the app's edge, or a tab
@@ -315,7 +382,7 @@ def persona_groups():
                 f'<h2 data-part="persona-name" data-action="toggle-persona-card" aria-expanded="true">'
                 f'<span data-part="persona-avatar" aria-hidden="true">{esc(p["name"][:1].upper())}</span>'
                 f'<span data-part="label">{nm}</span><span data-part="persona-toggle" aria-hidden="true">{icon("chev")}</span></h2>'
-                f'<div data-part="persona-body"><ul data-part="persona-agents" aria-label="{nm}\'s agents">{dots}</ul>'
+                f'<div data-part="persona-body"><ul data-part="persona-agents" aria-label="{nm}\'s agents">{dots}</ul>{persona_usage(p.get("usage"), NOW)}'
                 f'<div data-part="persona-buttons"><button type="button" data-action="toggle-persona" data-part="show-agents" aria-pressed="true" aria-label="Hide agents" data-tip="Show or hide {nm}\'s agent cards">{icon("eye")}{icon("eye-off")}</button>'
                 f'<button type="button" data-action="persona-settings" aria-label="Persona settings" data-tip="{nm}\'s settings">{icon("gear")}</button></div></div></article>'
                 + "".join(lane_card(L, NOW) for L in lanes) + add_slot(persona=p["id"]) + '</section>')
@@ -883,6 +950,7 @@ def app_menu():
       <li role="none" data-part="settings-entry"><button type="button" role="menuitem" data-action="app-settings">{icon("gear")}<span>Schedule and health check…</span></button></li>
       <li role="separator" data-part="settings-entry"></li>
       <li role="none"><label role="menuitemcheckbox" data-view="on-top"><input type="checkbox" data-view-toggle="on-top">{icon("pin")}<span>Keep on top</span></label></li>
+      <li role="none"><label role="menuitemcheckbox" data-view="fable-usage" data-tip="Show a Fable usage window on the persona card when the plan reports one"><input type="checkbox" data-view-toggle="fable-usage" checked>{icon("eye")}<span>Show Fable usage</span></label></li>
     </menu>'''
 
 # The Look menu (Ra, 10/6: one long menu ran off the screen; "a second menu
@@ -1047,7 +1115,7 @@ def page():
 </head>
 <body>
 {sprite()}
-<div class="nw-app" data-show-controls="true" data-show-timeline="true" data-show-log="true" data-timeline-mode="expanded" data-layout="row">
+<div class="nw-app" data-show-controls="true" data-show-timeline="true" data-show-log="true" data-show-fable-usage="true" data-timeline-mode="expanded" data-layout="row">
   <header class="nw-head" data-tauri-drag-region>
     <span class="nw-glyph" data-phase="{DAEMON["phase"]}" role="img" aria-label="{ALARM_ARIA[DAEMON["phase"]]}" data-tip="{glyph_tip()}"></span>
     <h1 data-part="title">Nightwatch</h1>
