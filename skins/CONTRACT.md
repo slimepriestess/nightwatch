@@ -467,13 +467,19 @@ Written by: claude-opus-5-5, 2026-10-05 (v0.1–v0.4)
 - **Runtime.** The label flips to the next shown window (focus follows); the choice is remembered per persona
   (`state.usage`) and put back after every refresh; hiding Fable moves a card off a Fable window and flipping skips
   it. `time[data-part="usage-reset"]` ticks with the others.
-- **Skins.** Minimal draws it in the context meter's language, in the plan's own colours (blue, amber at 80%, red at
-  the limit; never the persona's state colour, which can be red for an unrelated failed lane), dims a stale block,
+- **Skins.** The usage meter wears its skin's lane-meter look (Ra, 11/19 round 4: it looked "flatter" than the lane
+  bars). It uses the context meter's grid (the label in the icon's 16px slot, the bar, a 38px percentage), and the
+  reset time stays in the tip in every layout. In Vertical and Stacked it takes its own full-width row under the
+  lights and buttons, so the lights never wrap. build_skins.py re-emits each theme's `.nw-lane … [data-part="context"]
+  …` rules for `[data-part="persona-card"] … [data-part="usage-window"] …` (leaving out fold-target rules), so a theme
+  styles one meter and both follow. Minimal colours it in the plan's own colours (blue, amber at 80%, red at the limit;
+  never the persona's state colour, which can be red for an unrelated failed lane), dims a stale block,
   and leaves an expired window's track empty. In the Horizontal spine (Ra, 11/19: it must never lengthen the
   column past the cards) the bar curls into a 22px ring under the agent lights (her placement); the label in its
   centre is the flip button, and the percentage and the reset time move to the tip. A spine is as tall as its row's
   tallest card, so the ring costs nothing while any card in the row is open (Weft's spine needs 163px; its shortest
   open card is 178px). With every card in a row folded, the row grows by the ring: 38px for Weft, 23 to 33px for a
-  one-agent persona. The spines keep their width in every skin.
+  one-agent persona. The spines keep their width in every skin. The ring's fill runs from a lighter tint to the
+  meter colour along its arc, keeps the skin's track bevel, and glows in Glass and Amber, as their lane meters do.
   Glass, Amber, Metal, Brassworks and Concrete take it through build_skins.py. Moonlamp hides persona cards, so it
   shows no usage.

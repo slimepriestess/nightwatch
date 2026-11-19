@@ -176,3 +176,6 @@
 /* Glass's Horizontal deck is a card-width narrower than the others (no gutter): a slimmer Wake all keeps the
    transport's squares full size on their line (10/7). */
 .nw-app:not([data-layout="column"]) .nw-controls [data-part="transport"] > [data-part="primary"] { padding-inline: 8px 10px; }
+
+/* Plan usage (11/19 round 4): the spine's ring glows the way this skin's lane meters do. */
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--meter) 55%, transparent)); }
