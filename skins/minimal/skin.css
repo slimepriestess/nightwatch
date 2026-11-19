@@ -767,7 +767,8 @@ html[data-gallery="1"] .nw-gallery { grid-area: gallery; display: grid; grid-tem
 :is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"] { grid-area: 1 / 1; width: 22px; height: 22px; border-radius: 50%;
   background: conic-gradient(color-mix(in srgb, var(--meter) 65%, #fff), var(--meter) calc(var(--fill) * 1turn), var(--nw-sunk) 0); /* the skin's track shadow stays, as its bevel */
   -webkit-mask: radial-gradient(circle, transparent 7.5px, #000 8px); mask: radial-gradient(circle, transparent 7.5px, #000 8px); }
-:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"]:is(::before, ::after) { content: none; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"]::before,
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"]::after { content: none; } /* the skin's bar fill and needle have no place on a ring (:is() can't hold pseudo-elements) */
 :is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="usage-label"] { grid-area: 1 / 1; z-index: 1; width: 22px; height: 22px; max-width: none; padding: 0;
   border-radius: 50%; background: none; font-size: 7.5px; line-height: 22px; text-align: center; letter-spacing: 0; }
 :is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] button[data-part="usage-label"]:hover { background: color-mix(in srgb, var(--nw-ink) 9%, transparent); }
