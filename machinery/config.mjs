@@ -126,6 +126,11 @@ export const DEFAULTS = {
     // Each wake's real first request beside its fold's estimate (watch.mjs),
     // joinable with folds.jsonl by tail: the estimate's nightly calibration.
     wakeCosts: 'ladder/wake-costs.jsonl',
+    // Where the statusline usage tee (machinery/usage-tee.mjs) drops the
+    // plan's rate-limit windows for the persona card. The tee is opt-in:
+    // the hub's person points their Claude Code statusLine at it with
+    // --out <this path>; nothing here runs it.
+    usage: 'wakecycle/usage.json',
     // Claude Code's live session status files (pid, sessionId, status).
     sessions: join(HOME, '.claude', 'sessions'),
     armedFile: 'wakecycle/nightshift.armed',

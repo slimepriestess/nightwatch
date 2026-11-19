@@ -487,5 +487,75 @@ const usageLine = (id, agoMs, ctxTokens, outTokens) => JSON.stringify({
     JSON.stringify([withGiven?.given ?? null, withGiven?.name ?? null, without?.given ?? null, blanked?.given ?? null]));
 }
 
+// ---- probes: plan-usage on the persona card (usage-tee → persona.usage).
+// The tee writes rate_limits verbatim; assemble normalizes to windows the
+// card can render without knowing Claude Code's field names, flags a stale
+// file (the tee only writes while a session runs) and an expired window
+// (resets_at passed: the file's percentage describes a window that ended).
+{
+  const ucfg = { ...cfg, paths: { ...cfg.paths, usage: '/usage.json' } };
+  const teeDoc = (agoMs, rateLimits) => JSON.stringify({
+    at: iso(agoMs), provider: 'anthropic', source: 'statusline',
+    session_id: 'sid-1', version: '2.1.328', model: 'claude-fable-5',
+    rate_limits: rateLimits,
+  });
+  const io = (doc) => ({
+    readText: (p) => p === '/usage.json' ? doc : p === '/armed' ? 'fable' : null,
+    readDir: () => [], stat: () => null, readTail: () => null,
+    livePids: () => [], psCommand: () => null, now: () => NOW,
+  });
+  const epoch = (inMs) => Math.round((NOW + inMs) / 1000);
+
+  let u = assemble(ucfg, io(teeDoc(60e3, {
+    five_hour: { used_percentage: 37.2, resets_at: epoch(2 * 3600e3) },
+    seven_day: { used_percentage: 61.5, resets_at: epoch(3 * 86400e3) },
+  })), '8h').PERSONAS[0].usage;
+  check('fresh tee file → persona.usage with both windows, in order, pct and ISO resets',
+    u?.provider === 'anthropic' && u?.stale === false
+    && u?.windows?.[0]?.key === 'five_hour' && u.windows[0].pct === 37.2
+    && u.windows[1]?.key === 'seven_day' && u.windows[1].pct === 61.5
+    && typeof u.windows[0].resetsAt === 'string' && !isNaN(Date.parse(u.windows[0].resetsAt))
+    && u.windows[0].expired === false,
+    JSON.stringify(u));
+
+  u = assemble(ucfg, io(teeDoc(45 * 60e3, {
+    five_hour: { used_percentage: 12, resets_at: epoch(3600e3) },
+  })), '8h').PERSONAS[0].usage;
+  check('a tee file older than the freshness horizon is marked stale, data kept',
+    u?.stale === true && u?.windows?.[0]?.pct === 12, JSON.stringify(u));
+
+  u = assemble(ucfg, io(teeDoc(60e3, {
+    five_hour: { used_percentage: 88, resets_at: epoch(-120e3) },
+    seven_day: { used_percentage: 40, resets_at: epoch(86400e3) },
+  })), '8h').PERSONAS[0].usage;
+  check('a window whose resets_at has passed is flagged expired; its sibling is not',
+    u?.windows?.[0]?.expired === true && u?.windows?.[1]?.expired === false,
+    JSON.stringify(u?.windows));
+
+  u = assemble(ucfg, io(teeDoc(60e3, {
+    seven_day: { used_percentage: 61, resets_at: epoch(86400e3) },
+    weekly_fable: { used_percentage: 25, resets_at: epoch(86400e3) },
+    five_hour: { used_percentage: 5, resets_at: epoch(3600e3) },
+    spend_limit: { used_percentage: 10, resets_at: epoch(86400e3), used_usd: 4.2, limit_usd: 42, period: 'weekly' },
+  })), '8h').PERSONAS[0].usage;
+  check('known windows come first in canonical order; unknown ones follow and keep extra fields',
+    u?.windows?.map((w) => w.key).join(',') === 'five_hour,seven_day,spend_limit,weekly_fable'
+    && u.windows[2].usedUsd === 4.2 && u.windows[2].limitUsd === 42 && u.windows[2].period === 'weekly',
+    JSON.stringify(u?.windows));
+
+  u = assemble(ucfg, io(teeDoc(60e3, null)), '8h').PERSONAS[0].usage;
+  check('a tee file with rate_limits null (API-key account) → usage with empty windows, not a lie',
+    u?.windows?.length === 0 && u?.stale === false, JSON.stringify(u));
+
+  u = assemble(ucfg, io(null), '8h').PERSONAS[0].usage;
+  check('no tee file → no usage field (the card shows nothing, not zeros)', u === undefined, JSON.stringify(u));
+
+  u = assemble(ucfg, io('not json {'), '8h').PERSONAS[0].usage;
+  check('a malformed tee file → no usage field', u === undefined, JSON.stringify(u));
+
+  const noPath = assemble(cfg, io(teeDoc(60e3, {})), '8h').PERSONAS[0].usage;
+  check('no cfg.paths.usage → no usage field (old configs unaffected)', noPath === undefined, JSON.stringify(noPath));
+}
+
 console.log(failures === 0 ? 'PROBES CLEAN' : `PROBES: ${failures} failure(s)`);
 process.exit(failures ? 1 : 0);

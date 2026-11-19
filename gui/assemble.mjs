@@ -307,6 +307,54 @@ const TIP = { 'fold-requested': 'Fold requested (bell + deadline)', 'fold-reques
 const RANGE_HOURS = { '8h': 8, '24h': 24, '3d': 72, '7d': 168 };
 const RANGE_LABEL = { '8h': 'Last 8 hours', '24h': 'Last 24 hours', '3d': 'Last 3 days', '7d': 'Last 7 days' };
 
+// Plan usage for the persona card: the usage-tee file (machinery/usage-tee.mjs)
+// normalized into windows the card renders without knowing Claude Code's
+// field names. Account-scoped on purpose — every lane drains one plan, so
+// this lives on the persona, not a lane. The tee writes only while a
+// session is running, so the file goes quiet overnight: `stale` says the
+// numbers are old (data kept, card dims), `expired` says a window's own
+// resets_at has passed (its percentage describes a window that ended).
+const USAGE_WINDOW_ORDER = ['five_hour', 'seven_day', 'spend_limit'];
+const USAGE_STALE_MS = 15 * 60_000;
+function usageFor(cfg, io, nowMs) {
+  if (!cfg.paths?.usage) return undefined;
+  const raw = io.readText(cfg.paths.usage);
+  if (!raw) return undefined;
+  let doc;
+  try { doc = JSON.parse(raw); } catch { return undefined; }
+  if (!doc || typeof doc !== 'object') return undefined;
+  const atMs = Date.parse(doc.at);
+  const keys = Object.keys(doc.rate_limits && typeof doc.rate_limits === 'object' ? doc.rate_limits : {});
+  keys.sort((a, b) => {
+    const ia = USAGE_WINDOW_ORDER.indexOf(a), ib = USAGE_WINDOW_ORDER.indexOf(b);
+    return (ia < 0 ? USAGE_WINDOW_ORDER.length : ia) - (ib < 0 ? USAGE_WINDOW_ORDER.length : ib) || a.localeCompare(b);
+  });
+  const windows = [];
+  for (const key of keys) {
+    const w = doc.rate_limits[key];
+    if (!w || typeof w !== 'object') continue;
+    // resets_at is documented as epoch seconds; tolerate a ms-shaped value.
+    const resetsMs = typeof w.resets_at === 'number' ? (w.resets_at > 1e12 ? w.resets_at : w.resets_at * 1000) : null;
+    const win = {
+      key,
+      pct: typeof w.used_percentage === 'number' ? w.used_percentage : null,
+      resetsAt: resetsMs ? new Date(resetsMs).toISOString() : null,
+      expired: resetsMs ? resetsMs < nowMs : false,
+    };
+    if (typeof w.used_usd === 'number') win.usedUsd = w.used_usd;
+    if (typeof w.limit_usd === 'number') win.limitUsd = w.limit_usd;
+    if (typeof w.period === 'string') win.period = w.period;
+    windows.push(win);
+  }
+  return {
+    provider: doc.provider ?? 'anthropic',
+    at: doc.at ?? null,
+    stale: Number.isNaN(atMs) ? true : nowMs - atMs > USAGE_STALE_MS,
+    model: doc.model ?? null,
+    windows,
+  };
+}
+
 export function assemble(cfg, io, range = '8h') {
   const nowMs = io.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -386,6 +434,8 @@ export function assemble(cfg, io, range = '8h') {
   const folder = String(cfg.weftRoot ?? '').replace(/\/+$/, '').split('/').pop() || 'persona';
   const personaName = cfg.persona?.name ?? folder.charAt(0).toUpperCase() + folder.slice(1);
   const persona = { id: cfg.persona?.id ?? folder.toLowerCase(), name: personaName };
+  const usage = usageFor(cfg, io, nowMs);
+  if (usage) persona.usage = usage;
   const LANES = Object.keys(cfg.lanes ?? {}).map((id) => {
     const lc = laneCfg(cfg, id);
     const r = reg[id];
