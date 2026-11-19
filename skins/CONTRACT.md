@@ -469,6 +469,10 @@ Written by: claude-opus-5-5, 2026-10-05 (v0.1–v0.4)
   it. `time[data-part="usage-reset"]` ticks with the others.
 - **Skins.** Minimal draws it in the context meter's language, in the plan's own colours (blue, amber at 80%, red at
   the limit; never the persona's state colour, which can be red for an unrelated failed lane), dims a stale block,
-  and leaves an expired window's track empty. In the Horizontal spine the meter stands up and fills from the bottom
-  (64px at its natural height, up to 180px in a tall row; the runtime sizes the row to the spine). Glass, Amber,
-  Metal, Brassworks and Concrete take it through build_skins.py. Moonlamp hides persona cards, so it shows no usage.
+  and leaves an expired window's track empty. In the Horizontal spine (Ra, 11/19: it must never lengthen the
+  column past the cards) the bar curls into a 22px ring beside the agent lights, centred on the first light; the label
+  in its centre is the flip button, and the percentage and the reset time move to the tip. The spine widens by
+  `--nw-usage-gutter` (12px; Concrete 25px) only while some persona shows usage; Glass's hanging tab grows on its
+  own. Measured with every card folded, the ring adds 0px to any persona row in Minimal, Glass, Amber and Concrete.
+  Glass, Amber, Metal, Brassworks and Concrete take it through build_skins.py. Moonlamp hides persona cards, so it
+  shows no usage.
