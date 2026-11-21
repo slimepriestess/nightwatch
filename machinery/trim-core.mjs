@@ -41,13 +41,14 @@ export function estLine(l) {
 
 const OVERSHOOT = 1.25;
 
+/** The members an adapter must supply; trimTail refuses, by name, one that lacks any. */
+export const REQUIRED = ['parse', 'serialize', 'weigh', 'drop', 'inert', 'isSeam', 'order', 'keep', 'mayCarryImages', 'stripImages', 'validate', 'timestampOf'];
+
 /**
  * Trim a transcript. `warn` receives each stderr line in order. Returns
  * { refused: { exit, message } } when there is nothing to cut at or the tail fails the adapter's check,
  * or { keptLines, report facts } otherwise. Writing the file is the caller's.
  */
-export const REQUIRED = ['parse', 'serialize', 'weigh', 'drop', 'inert', 'isSeam', 'order', 'keep', 'mayCarryImages', 'stripImages', 'validate', 'timestampOf'];
-
 export function trimTail({ lines, adapter, target, imageBudget, warn }) {
   // A missing member fails here, by name, before anything is read: the format gate (validate) is not
   // optional, and an adapter without it must not get as far as a tail.

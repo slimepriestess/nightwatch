@@ -25,6 +25,10 @@ const run = (adapter) => {
   }
 };
 
+// The list itself, literally: the loop below reads REQUIRED, so a member dropped from it would leave
+// every other check green. validate above all: the format gate is the one member that must never be optional.
+check('REQUIRED names exactly the contract\'s members', JSON.stringify(REQUIRED) === JSON.stringify(['parse', 'serialize', 'weigh', 'drop', 'inert', 'isSeam', 'order', 'keep', 'mayCarryImages', 'stripImages', 'validate', 'timestampOf']), JSON.stringify(REQUIRED));
+
 // The real adapter has every member, and trims.
 {
   const { r } = run(claudeCode);
