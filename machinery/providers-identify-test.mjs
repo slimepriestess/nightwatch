@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { identify } from './providers/claude-code.mjs';
-import { laneConfig } from './config.mjs';
+import { laneConfig, providerOf } from './config.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 let fails = 0;
@@ -55,7 +55,9 @@ check('every launch-surface flag claimed as defined has a definition line in eac
   for (const f of fixtures) {
     const help = readFileSync(join(HERE, 'testdata', f), 'utf8');
     for (const s of launchSurface.filter((x) => x.defined && x.kind === 'flag')) {
-      const re = new RegExp(`^\\s+(-\\w, )?${s.name}\\b`, 'm');
+      // (?![\\w-]) and not \\b: a word boundary would let --model match
+      // --model-fallback's definition line (second chair's nit).
+      const re = new RegExp(`^\\s+(-\\w, )?${s.name}(?![\\w-])`, 'm');
       assert.ok(re.test(help), `${s.name} has no definition line in ${f}`);
     }
   }
@@ -65,6 +67,14 @@ check("laneConfig defaults a lane's provider to claude-code, and a configured on
   const cfg = { lanes: { a: {}, b: { provider: 'codex' } } };
   assert.equal(laneConfig(cfg, 'a').provider, 'claude-code');
   assert.equal(laneConfig(cfg, 'b').provider, 'codex');
+});
+
+check('providerOf — the one stamp implementation — agrees with the readers about every default', () => {
+  const lanes = { a: {}, b: { provider: 'codex' } };
+  assert.equal(providerOf(lanes, 'a'), 'claude-code');
+  assert.equal(providerOf(lanes, 'b'), 'codex');
+  assert.equal(providerOf(lanes, 'unknown-lane'), 'claude-code', 'an unknown lane stamps the readers\' own default');
+  assert.equal(providerOf(undefined, 'a'), 'claude-code');
 });
 
 console.log(fails ? `\n${fails} FAILED` : '\nall pass');

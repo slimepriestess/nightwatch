@@ -206,6 +206,7 @@ const cfgWarn = (name, wakeCostWarn) => { const f = join(root, `${name}.config.j
 wakeWith('t-bound', 'w-bound', 'opus', 'claude-opus-5-5', 500_000, 200_000);
 tick();
 check('exactly on the share warns', lines(EVENTS).filter((e) => e.kind === 'wake-cost-high' && e.session === 'w-bound').map((e) => e.ratio), [0.5]);
+check('a fresh-built event about a lane is enriched with its provider on the way out (emit)', lines(EVENTS).filter((e) => e.kind === 'wake-cost-high' && e.session === 'w-bound').map((e) => e.provider), ['claude-code']);
 wakeWith('t-cfg', 'w-cfg', 'opus', 'claude-opus-5-5', 350_000, 200_000);
 tick(cfgWarn('warn30', 0.3));
 check("the share is the config's: 35% warns at 0.3 and records the share it used", lines(EVENTS).filter((e) => e.kind === 'wake-cost-high' && e.session === 'w-cfg').map((e) => [e.ratio, e.warnAt]), [[0.35, 0.3]]);
@@ -251,6 +252,12 @@ appendFileSync(join(root, 'ladder', 'wake-costs.jsonl'), JSON.stringify({ at: is
 wakeWith('t-v7', 'w-v7', 'opus', 'claude-opus-5-5', 100_000, 100_000, '2.1.311');
 tick();
 check('a version seen only under another provider still fires claude-version-new', newOnes().includes('2.1.311<-2.1.309'), true);
+// And the stamp itself follows the lane's config: a codex lane's wake-cost
+// row says codex (the stamp is providerOf's, never a hardcoded default).
+const cfgProv = (() => { const f = join(root, 'prov.config.json'); const c = JSON.parse(readFileSync(CONFIG, 'utf8')); writeFileSync(f, JSON.stringify({ ...c, lanes: { ...(c.lanes ?? {}), gamma: { provider: 'codex' } } })); return f; })();
+wakeWith('t-cx', 'w-cx', 'gamma', 'claude-opus-5-5', 100_000, 100_000, '0.9.0');
+tick(cfgProv);
+check('a codex-configured lane stamps codex on its wake-cost row', lines(join(root, 'ladder', 'wake-costs.jsonl')).filter((r) => r.tail === 't-cx').map((r) => r.provider), ['codex']);
 check('and no version event ever sent a notification', lines(SENT).some((m) => JSON.stringify(m).includes('claude-version')), false);
 
 // The head witness: the woken session's own api-request-shape holds the system blocks as sent; the

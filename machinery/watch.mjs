@@ -71,7 +71,7 @@ import { notifyBanner } from './platform.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contextOfEntries, envWithConfig, loadConfig, loadConfigFrom, windowForLane } from './config.mjs';
+import { contextOfEntries, envWithConfig, loadConfig, loadConfigFrom, providerOf, windowForLane } from './config.mjs';
 
 const CFG = loadConfig();
 const W = CFG.watch;
@@ -89,7 +89,7 @@ function log(line) {
 function emit(event) {
   // Every persisted row names its provider (providers r1). An event about a
   // lane inherits the lane's; one already stamped keeps what it was given.
-  if (event.lane != null && event.provider === undefined) event = { ...event, provider: CFG.lanes?.[event.lane]?.provider ?? 'claude-code' };
+  if (event.lane != null && event.provider === undefined) event = { ...event, provider: providerOf(CFG.lanes, event.lane) };
   try { appendFileSync(P.events, JSON.stringify(event) + '\n'); } catch (e) { log(`event write failed: ${e.message}`); }
 }
 
@@ -640,7 +640,7 @@ function wakeCostCheck(now) {
     let lane = null;
     try { lane = JSON.parse(readFileSync(woken.file, 'utf8')).lane ?? null; } catch {}
     const witness = headWitness({ wokenPath, sid: woken.sid, lane, tail: row.tail, foldAt, source: row.source });
-    const provider = CFG.lanes?.[lane]?.provider ?? 'claude-code';
+    const provider = providerOf(CFG.lanes, lane);
     const record = { at: first.at, lane, provider, tail: row.tail, session: woken.sid, source: row.source ?? null, estTokens: row.est_tokens ?? null, firstRequestTokens: first.tokens, ...(first.version ? { version: first.version } : {}), ...(witness.status === 'measured' ? { headMatch: witness.share, headRef: witness.ref, ...(witness.fresh !== null ? { headFresh: witness.fresh } : {}), ...(witness.disc !== null ? { headDisc: witness.disc } : {}) } : {}) };
     // The version that WOKE on the folded tail is the one that has to read its
     // format, so the row is the receipt that this version woke clean (the first

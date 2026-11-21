@@ -31,6 +31,11 @@ try {
   check('the registry entry carries the lane\'s provider (claude-code by default)', () => assert.equal(entry('sid-new').provider, 'claude-code'));
   check('the arming line names the config as NIGHTWATCH_CONFIG', () => assert.match(out, new RegExp(`NIGHTWATCH_CONFIG=${cfg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `)));
 
+  const cfgCodex = join(hub, 'codex.config.json');
+  writeFileSync(cfgCodex, JSON.stringify({ defaultLane: 'alpha', lanes: { alpha: { provider: 'codex' }, beta: {} } }));
+  run({ NIGHTWATCH_CONFIG: cfgCodex, NIGHTWATCH_LANE: 'alpha' }, 'sid-codex');
+  check('a configured provider reaches the registry entry', () => assert.equal(entry('sid-codex').provider, 'codex'));
+
   run({ WEFT_CONFIG: cfg, WEFT_LANE: 'beta' }, 'sid-old');
   check('an older wake\'s WEFT_LANE (and WEFT_CONFIG) still registers', () => assert.equal(entry('sid-old').lane, 'beta'));
 

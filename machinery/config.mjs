@@ -354,6 +354,13 @@ export function switchboardLane(cfg) {
   return cfg.defaultLane;
 }
 
+/** The provider of a lane's rows (providers r1): the lane's configured one,
+ *  claude-code when the config names none — and for an UNKNOWN lane too,
+ *  because a row without provenance is claude-code's by definition and the
+ *  stampers must agree with the readers about that. THE one implementation;
+ *  watch's emit, nightshift's events and the wake-cost record all call it. */
+export const providerOf = (lanes, lane) => lanes?.[lane]?.provider ?? 'claude-code';
+
 export function laneConfig(cfg, lane) {
   const lc = cfg.lanes[lane];
   if (!lc) {
