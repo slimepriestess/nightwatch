@@ -7,9 +7,13 @@
  * itself: a row nothing edits keeps its raw line byte for byte, and every edit is the adapter's. Rows
  * are weighed by their raw lines and the cut is a line index, so one row is always one line.
  *
- * The adapter supplies: parse(line), weigh(line), drop(row) (never kept, never weighed), inert(row)
- * (kept, never weighed, never sent), isSeam(row), order(rows, cut), keep(rows, lines, order),
- * mayCarryImages(line), stripImages(row, take, budget), validate(keptLines, ctx), timestampOf(row).
+ * The adapter supplies (REQUIRED below; trimTail refuses an adapter that lacks one): parse(line) (a row,
+ * or null for a line it can't read), serialize(row) (the line for a row the adapter edited), weigh(line),
+ * drop(row) (never kept, never weighed), inert(row) (kept, never weighed, never sent), isSeam(row),
+ * order(rows, cut), keep(rows, lines, order), mayCarryImages(line), stripImages(row, take, budget),
+ * validate(keptLines, ctx) (an array of problems; any problem blocks the write), timestampOf(row).
+ * The core reads and writes rows only through parse and serialize; it assumes a transcript is lines,
+ * one row per line, and nothing about what a line holds.
  *
  * Moved out of trim.mjs (PR A of anima_dev/nightwatch_providers_design.md) with no change in behavior:
  * every archived transcript folds to the same bytes, report and exit before and after.
@@ -42,7 +46,13 @@ const OVERSHOOT = 1.25;
  * { refused: { exit, message } } when there is nothing to cut at or the tail fails the adapter's check,
  * or { keptLines, report facts } otherwise. Writing the file is the caller's.
  */
+export const REQUIRED = ['parse', 'serialize', 'weigh', 'drop', 'inert', 'isSeam', 'order', 'keep', 'mayCarryImages', 'stripImages', 'validate', 'timestampOf'];
+
 export function trimTail({ lines, adapter, target, imageBudget, warn }) {
+  // A missing member fails here, by name, before anything is read: the format gate (validate) is not
+  // optional, and an adapter without it must not get as far as a tail.
+  const missing = REQUIRED.filter((m) => typeof adapter?.[m] !== 'function');
+  if (missing.length) return { refused: { exit: 2, message: `trim: the ${adapter?.name ?? 'unnamed'} adapter lacks ${missing.join(', ')}` } };
   const entries = lines.map((l) => adapter.parse(l));
   const torn = entries.filter((e) => e === null).length;
   if (torn) warn(`warning: ${torn} unparseable line(s) will be dropped`);
@@ -103,19 +113,21 @@ export function trimTail({ lines, adapter, target, imageBudget, warn }) {
   };
   for (let k = kept.length - 1; k >= 0; k--) {
     if (!adapter.mayCarryImages(kept[k])) continue;
-    let e; try { e = JSON.parse(kept[k]); } catch { continue; }
+    const e = adapter.parse(kept[k]);
+    if (e === null) continue;
     // The request log (api-request-blob and kin) is never sent on resume: its copies neither count against
     // the budget nor take a place in it (a log copy once used up the whole budget and a real image went).
     if (adapter.inert(e)) continue;
     const edited = adapter.stripImages(e, take, imageBudget);
-    if (edited) kept[k] = JSON.stringify(edited);
+    if (edited) kept[k] = adapter.serialize(edited);
   }
   if (imagesStripped.count) {
     keptEst = 0;
-    for (const l of kept) { let e = null; try { e = JSON.parse(l); } catch {} if (!adapter.inert(e)) keptEst += adapter.weigh(l); }
+    for (const l of kept) if (!adapter.inert(adapter.parse(l))) keptEst += adapter.weigh(l);
   }
 
   const problems = adapter.validate(kept, { movedIn });
+  if (!Array.isArray(problems)) return { refused: { exit: 2, message: `trim: the ${adapter.name ?? 'unnamed'} adapter's validate returned no list of problems` } };
   if (problems.length) return { refused: { exit: 1, message: `trim: OUTPUT CHECK FAILED, nothing written. ${problems.join('; ')}.` } };
 
   // Overshoot (incident fix 5, 10/8): the walk stops at the target, but the

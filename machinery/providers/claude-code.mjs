@@ -29,6 +29,11 @@ export function parse(line) {
   }
 }
 
+/** The line for a row this adapter edited. A row nothing edits keeps its own line. */
+export function serialize(e) {
+  return JSON.stringify(e);
+}
+
 /** A row's weight is its raw line's: the honest weight of what resumes. */
 export function weigh(line) {
   return estLine(line);
