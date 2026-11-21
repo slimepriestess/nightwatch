@@ -154,7 +154,8 @@ let LIVE_EMIT = false;
 function emitEvent(kind, fields = {}) {
   if (!LIVE_EMIT) return;
   try {
-    appendFileSync(EVENTS_FILE, JSON.stringify({ at: new Date().toISOString(), kind, ...fields }) + '\n');
+    const provider = fields.lane != null && fields.provider === undefined ? { provider: CFG.lanes?.[fields.lane]?.provider ?? 'claude-code' } : {};
+    appendFileSync(EVENTS_FILE, JSON.stringify({ at: new Date().toISOString(), kind, ...provider, ...fields }) + '\n');
   } catch { /* the viewer misses one event; the night proceeds */ }
 }
 

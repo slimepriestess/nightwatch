@@ -28,6 +28,7 @@ try {
 
   const out = run({ NIGHTWATCH_CONFIG: cfg, NIGHTWATCH_LANE: 'alpha' }, 'sid-new');
   check('NIGHTWATCH_LANE is recorded in the hub registry', () => assert.equal(entry('sid-new').lane, 'alpha'));
+  check('the registry entry carries the lane\'s provider (claude-code by default)', () => assert.equal(entry('sid-new').provider, 'claude-code'));
   check('the arming line names the config as NIGHTWATCH_CONFIG', () => assert.match(out, new RegExp(`NIGHTWATCH_CONFIG=${cfg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `)));
 
   run({ WEFT_CONFIG: cfg, WEFT_LANE: 'beta' }, 'sid-old');

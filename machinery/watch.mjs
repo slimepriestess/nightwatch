@@ -87,6 +87,9 @@ function log(line) {
 }
 
 function emit(event) {
+  // Every persisted row names its provider (providers r1). An event about a
+  // lane inherits the lane's; one already stamped keeps what it was given.
+  if (event.lane != null && event.provider === undefined) event = { ...event, provider: CFG.lanes?.[event.lane]?.provider ?? 'claude-code' };
   try { appendFileSync(P.events, JSON.stringify(event) + '\n'); } catch (e) { log(`event write failed: ${e.message}`); }
 }
 
@@ -637,7 +640,8 @@ function wakeCostCheck(now) {
     let lane = null;
     try { lane = JSON.parse(readFileSync(woken.file, 'utf8')).lane ?? null; } catch {}
     const witness = headWitness({ wokenPath, sid: woken.sid, lane, tail: row.tail, foldAt, source: row.source });
-    const record = { at: first.at, lane, tail: row.tail, session: woken.sid, source: row.source ?? null, estTokens: row.est_tokens ?? null, firstRequestTokens: first.tokens, ...(first.version ? { version: first.version } : {}), ...(witness.status === 'measured' ? { headMatch: witness.share, headRef: witness.ref, ...(witness.fresh !== null ? { headFresh: witness.fresh } : {}), ...(witness.disc !== null ? { headDisc: witness.disc } : {}) } : {}) };
+    const provider = CFG.lanes?.[lane]?.provider ?? 'claude-code';
+    const record = { at: first.at, lane, provider, tail: row.tail, session: woken.sid, source: row.source ?? null, estTokens: row.est_tokens ?? null, firstRequestTokens: first.tokens, ...(first.version ? { version: first.version } : {}), ...(witness.status === 'measured' ? { headMatch: witness.share, headRef: witness.ref, ...(witness.fresh !== null ? { headFresh: witness.fresh } : {}), ...(witness.disc !== null ? { headDisc: witness.disc } : {}) } : {}) };
     // The version that WOKE on the folded tail is the one that has to read its
     // format, so the row is the receipt that this version woke clean (the first
     // real reply came back). A version no earlier row has seen is told once,
@@ -647,8 +651,10 @@ function wakeCostCheck(now) {
     // a label for "what ran last". A wake that dies before a real reply leaves
     // no row, so its version stays unseen and the next clean wake on it fires:
     // "woke clean" is the meaning.
+    // Newness is judged inside ONE provider's rows (providers r1): the same
+    // version string under another runtime is a different fact.
     let seenVersions = [];
-    try { seenVersions = readFileSync(P.wakeCosts, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l).version; } catch { return null; } }).filter(Boolean); } catch {}
+    try { seenVersions = readFileSync(P.wakeCosts, 'utf8').split('\n').filter(Boolean).map((l) => { try { const r = JSON.parse(l); return (r.provider ?? 'claude-code') === provider ? r.version : null; } catch { return null; } }).filter(Boolean); } catch {}
     try { appendFileSync(P.wakeCosts, JSON.stringify(record) + '\n'); } catch (e) { log(`wake-cost write failed: ${e.message}`); continue; }
     emit({ ...record, kind: 'wake-cost' });
     if (witness.status === 'measured') {

@@ -66,7 +66,11 @@ while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null && [ "$hops" -lt 8 ]; do
   p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' ')
   hops=$((hops + 1))
 done
-printf '{"lane":"%s","pid":%d,"at":"%s"}\n' "$NW_LANE" "$CLAUDE_PID" \
+# The lane's provider rides the entry (providers r1): rows are self-describing,
+# so readers never have to join against the config to know the runtime.
+PROVIDER="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.provider" 2>/dev/null)" || PROVIDER=""
+[ -n "$PROVIDER" ] || PROVIDER=claude-code
+printf '{"lane":"%s","pid":%d,"provider":"%s","at":"%s"}\n' "$NW_LANE" "$CLAUDE_PID" "$PROVIDER" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REG/lane.$SESSION_ID"
 SWITCH="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.switchboard" 2>/dev/null || echo false)"
 if [ "$SWITCH" != "true" ]; then

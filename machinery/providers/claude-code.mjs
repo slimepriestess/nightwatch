@@ -17,8 +17,61 @@
 import { join, dirname, basename } from 'node:path';
 
 import { estLine } from '../trim-core.mjs';
+import { resolveClaude, parseVersion } from '../versioncheck.mjs';
 
 export const name = 'claude-code';
+
+/**
+ * Who this adapter speaks for, with the receipt behind each claim
+ * (anima_dev/nightwatch_providers_design.md §4). Pure: all I/O is injected,
+ * so a test needs no real claude, and WITHOUT io the identity is still whole
+ * — version is then null with versionSource null, never a guess.
+ *
+ * io: { transcriptVersion } — a `version` read off the session's own rows
+ *     (the strongest source: it names what actually ran); or versioncheck's
+ *     shapes { claudeBin, isExecutable(path), lookupPath(), runVersion(path) }
+ *     to resolve the binary the way wake.sh does and ask it.
+ *
+ * launchSurface lists exactly the flags wake.sh's recipe stands on; each
+ * `defined` claim is checked against the REAL `--help` fixtures under
+ * machinery/testdata by providers-identify-test.mjs (the #44 lesson: a
+ * fixture written from docs agrees with the regexp written from the docs).
+ * witness: C4 is inject AND a witness it landed; Claude Code's witness is
+ * the transcript's own api-request-shape entry, scored on discriminating
+ * lines (watch.mjs's headWitness).
+ */
+export function identify(io = {}) {
+  let version = null;
+  let versionSource = null;
+  let bin = io.claudeBin ?? null;
+  let via = null;
+  if (io.isExecutable && io.lookupPath) {
+    const r = resolveClaude(io);
+    bin = r.path;
+    via = r.via;
+  }
+  if (typeof io.transcriptVersion === 'string' && io.transcriptVersion) {
+    version = io.transcriptVersion;
+    versionSource = 'transcript';
+  } else if (io.runVersion && bin) {
+    version = parseVersion(io.runVersion(bin));
+    versionSource = version ? '--version' : null;
+  }
+  return {
+    provider: name,
+    bin,
+    via,
+    lookupLabel: 'Claude Code',
+    version,
+    versionSource,
+    launchSurface: [
+      { name: '--resume', kind: 'flag', defined: true },
+      { name: '--fork-session', kind: 'flag', defined: true },
+      { name: '--model', kind: 'flag', defined: true },
+    ],
+    witness: 'api-request-shape',
+  };
+}
 
 /** One transcript row. A torn line is dropped like any other row, loudly (the core warns). */
 export function parse(line) {

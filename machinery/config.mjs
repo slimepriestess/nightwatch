@@ -361,7 +361,9 @@ export function laneConfig(cfg, lane) {
     throw new Error(`agent "${lane}" is not in the config (known: ${known}). ` +
       `Add it to ${cfg.__configFile ?? 'weft.config.json'} or pass a known agent.`);
   }
-  return { targetTokens: 250_000, switchboard: false, ...lc };
+  // provider: which runtime this lane runs on (providers/<name>.mjs). Every
+  // existing lane predates the field, so claude-code is the default by design.
+  return { targetTokens: 250_000, switchboard: false, provider: 'claude-code', ...lc };
 }
 
 /**
