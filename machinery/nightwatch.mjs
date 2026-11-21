@@ -409,7 +409,9 @@ function firstSessionStep(spec, hub, ctx, noActivate, cpPath, laneWc) {
         // The pid makes the liveness checks see the adopted session the way
         // they see a woken one; sourced from Claude Code's own session file.
         const live = readClaudeSessions().find((x) => x.sessionId === fs.sessionId);
-        writeFileSync(join(wcDir, `lane.${fs.sessionId}`), JSON.stringify({ lane: spec.lane.id, sessionId: fs.sessionId, ...(live?.pid ? { pid: live.pid } : {}), adopted: true, at: new Date().toISOString() }) + '\n');
+        writeFileSync(join(wcDir, `lane.${fs.sessionId}`), JSON.stringify({ lane: spec.lane.id, // providerOf's own default, spelled on the in-hand lane OBJECT: at adopt
+        // time the lane may not be in CFG.lanes yet, so there is no name to look up.
+        provider: spec.lane.provider ?? 'claude-code', sessionId: fs.sessionId, ...(live?.pid ? { pid: live.pid } : {}), adopted: true, at: new Date().toISOString() }) + '\n');
       },
     };
     return { prep, launch: null };

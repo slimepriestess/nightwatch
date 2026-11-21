@@ -30,7 +30,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { configEnv, contextOfEntries, loadConfig, reloadConfig, switchboardLane } from './config.mjs';
+import { providerOf, configEnv, contextOfEntries, loadConfig, reloadConfig, switchboardLane } from './config.mjs';
 import { cannotAnswer, liveTranscriptPath } from './deadwake.mjs';
 import { claudeVersionLines, flagLines, nodeLines, nodeRealIo, realIo as claudeVersionIo, wakePromptLines } from './versioncheck.mjs';
 
@@ -154,7 +154,8 @@ let LIVE_EMIT = false;
 function emitEvent(kind, fields = {}) {
   if (!LIVE_EMIT) return;
   try {
-    appendFileSync(EVENTS_FILE, JSON.stringify({ at: new Date().toISOString(), kind, ...fields }) + '\n');
+    const provider = fields.lane != null && fields.provider === undefined ? { provider: providerOf(CFG.lanes, fields.lane) } : {};
+    appendFileSync(EVENTS_FILE, JSON.stringify({ at: new Date().toISOString(), kind, ...provider, ...fields }) + '\n');
   } catch { /* the viewer misses one event; the night proceeds */ }
 }
 

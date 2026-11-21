@@ -66,13 +66,18 @@ export function parseVersion(text) {
   return m ? m[1] : null;
 }
 
-/** The distinct `version`s on wake-cost rows, in file order. A torn line is skipped. */
-export function seenVersions(jsonlText) {
+/** The distinct `version`s on one provider's wake-cost rows, in file order.
+ *  A torn line is skipped. Rows from before provenance carry no `provider`
+ *  and are claude-code's by definition (providers r1), so a Codex 0.x can
+ *  never seed or satisfy claude-code's set, nor the other way round. */
+export function seenVersions(jsonlText, provider = 'claude-code') {
   const out = [];
   for (const l of String(jsonlText ?? '').split('\n')) {
     if (!l.trim()) continue;
-    let v;
-    try { v = JSON.parse(l).version; } catch { continue; }
+    let row;
+    try { row = JSON.parse(l); } catch { continue; }
+    if ((row.provider ?? 'claude-code') !== provider) continue;
+    const v = row.version;
     if (typeof v === 'string' && v && !out.includes(v)) out.push(v);
   }
   return out;

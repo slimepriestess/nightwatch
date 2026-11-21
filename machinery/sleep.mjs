@@ -58,6 +58,7 @@ const lane = flag('--lane', CFG.defaultLane);
 // API-error exposure, and the E migration preserves that behavior in config
 // instead of a hardcoded lane name in the daemon.
 const laneCfg = laneConfig(CFG, lane);
+const PROVIDER = laneCfg.provider; // every persisted row names its provider (providers r1)
 const laneTarget = args.includes('--emergency') && laneCfg.emergencyTargetTokens
   ? laneCfg.emergencyTargetTokens : laneCfg.targetTokens;
 const target = Number(flag('--target-tokens', String(laneTarget)));
@@ -287,7 +288,7 @@ try {
   // agent's own session, so the event stream carries it too, for the app and
   // for whoever reads the night.
   try {
-    appendFileSync(CFG.paths.events, JSON.stringify({ at: new Date().toISOString(), kind: 'trim-failed', lane, session: sessionId, cause: why.split('\n').pop().slice(0, 300), alarm: true }) + '\n');
+    appendFileSync(CFG.paths.events, JSON.stringify({ at: new Date().toISOString(), kind: 'trim-failed', lane, provider: PROVIDER, session: sessionId, cause: why.split('\n').pop().slice(0, 300), alarm: true }) + '\n');
   } catch { /* an event lost, never a fold lost */ }
   process.exit(1);
 }
@@ -363,6 +364,7 @@ appendFileSync(
     at: new Date().toISOString(),
     reason: emergency && !authored ? 'forced' : 'sleep',
     method: 'trimmer',
+    provider: PROVIDER,
     source: `jsonl:${sessionId}`,
     cutAt: trimOut.cutAt,
     keptEntries: trimOut.keptEntries,
@@ -390,6 +392,7 @@ try {
     at: new Date().toISOString(),
     kind: 'folded',
     lane,
+    provider: PROVIDER,
     session: sessionId,
     tail: trimOut.newSessionId,
     kept: trimOut.keptEntries,

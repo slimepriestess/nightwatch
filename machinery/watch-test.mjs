@@ -145,6 +145,7 @@ check('the woken session records its first real request beside the estimate',
   costs.map(({ lane, tail, session, source, estTokens, firstRequestTokens }) => ({ lane, tail, session, source, estTokens, firstRequestTokens })),
   [{ lane: 'opus', tail: 't-good', session: 'w-good', source: 'jsonl:src-t-good', estTokens: 252_417, firstRequestTokens: 205_799 }]);
 check('the record is stamped with the reply\'s own time', costs[0]?.at, iso(now - 49 * 60_000));
+check('the record carries the lane\'s provider (claude-code when the lane config names none)', costs[0]?.provider, 'claude-code');
 check('and lands as a wake-cost event', lines(EVENTS).slice(eventsBefore).filter((e) => e.kind === 'wake-cost').map((e) => `${e.tail}:${e.firstRequestTokens}`), ['t-good:205799']);
 tick();
 check('a second tick records nothing twice', lines(join(root, 'ladder', 'wake-costs.jsonl')).length, 1);
@@ -205,6 +206,7 @@ const cfgWarn = (name, wakeCostWarn) => { const f = join(root, `${name}.config.j
 wakeWith('t-bound', 'w-bound', 'opus', 'claude-opus-5-5', 500_000, 200_000);
 tick();
 check('exactly on the share warns', lines(EVENTS).filter((e) => e.kind === 'wake-cost-high' && e.session === 'w-bound').map((e) => e.ratio), [0.5]);
+check('a fresh-built event about a lane is enriched with its provider on the way out (emit)', lines(EVENTS).filter((e) => e.kind === 'wake-cost-high' && e.session === 'w-bound').map((e) => e.provider), ['claude-code']);
 wakeWith('t-cfg', 'w-cfg', 'opus', 'claude-opus-5-5', 350_000, 200_000);
 tick(cfgWarn('warn30', 0.3));
 check("the share is the config's: 35% warns at 0.3 and records the share it used", lines(EVENTS).filter((e) => e.kind === 'wake-cost-high' && e.session === 'w-cfg').map((e) => [e.ratio, e.warnAt]), [[0.35, 0.3]]);
@@ -243,6 +245,19 @@ wakeWith('t-v6', 'w-v6', 'opus', 'claude-opus-5-5', 100_000, 100_000, '2.1.309')
 tick();
 check('a version seen earlier, but not last, coming back raises nothing (a rollback)', newOnes(), ['2.1.310<-2.1.309']);
 check('and its row still lands with the version that woke', versions().includes('t-v6:2.1.309'), true);
+// Version-newness is keyed per provider (providers r1): another provider's
+// row carrying the same version string never seeds or satisfies claude-code's
+// set. Seen so far for claude-code: {2.1.309, 2.1.310}, last row's 2.1.309.
+appendFileSync(join(root, 'ladder', 'wake-costs.jsonl'), JSON.stringify({ at: iso(now), lane: 'opus', tail: 't-x', session: 'w-x', provider: 'codex', version: '2.1.311' }) + '\n');
+wakeWith('t-v7', 'w-v7', 'opus', 'claude-opus-5-5', 100_000, 100_000, '2.1.311');
+tick();
+check('a version seen only under another provider still fires claude-version-new', newOnes().includes('2.1.311<-2.1.309'), true);
+// And the stamp itself follows the lane's config: a codex lane's wake-cost
+// row says codex (the stamp is providerOf's, never a hardcoded default).
+const cfgProv = (() => { const f = join(root, 'prov.config.json'); const c = JSON.parse(readFileSync(CONFIG, 'utf8')); writeFileSync(f, JSON.stringify({ ...c, lanes: { ...(c.lanes ?? {}), gamma: { provider: 'codex' } } })); return f; })();
+wakeWith('t-cx', 'w-cx', 'gamma', 'claude-opus-5-5', 100_000, 100_000, '0.9.0');
+tick(cfgProv);
+check('a codex-configured lane stamps codex on its wake-cost row', lines(join(root, 'ladder', 'wake-costs.jsonl')).filter((r) => r.tail === 't-cx').map((r) => r.provider), ['codex']);
 check('and no version event ever sent a notification', lines(SENT).some((m) => JSON.stringify(m).includes('claude-version')), false);
 
 // The head witness: the woken session's own api-request-shape holds the system blocks as sent; the

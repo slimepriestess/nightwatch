@@ -52,6 +52,8 @@ NW_CFG="${NIGHTWATCH_CONFIG:-${WEFT_CONFIG:-}}"
 if [ -n "$NW_CFG" ]; then FALLBACK_LOG="$(dirname "$NW_CFG")/nightshift.log"; else FALLBACK_LOG="$WAKECYCLE_DIR/../nightshift.log"; fi
 WEFT_LOG="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get paths.nightshiftLog)" || {
   echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE FAILED: weft config unreadable (node config.mjs get failed) — fix weft.config.json" >> "$FALLBACK_LOG"
+  # No provider stamp here ON PURPOSE: the config is unreadable, so the lane's
+  # provider is unknowable; readers' missing-means-claude-code default applies.
   echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"kind\":\"wake-failed\",\"lane\":\"${1:-unknown}\",\"cause\":\"config-unreadable\",\"alarm\":true}" >> "$(dirname "$FALLBACK_LOG")/events.jsonl" 2>/dev/null || true
   exit 4
 }
@@ -206,7 +208,11 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake receipt: $LANE lane reached exec (
 # Event-stream twin: the receipt's JSON echo, best-effort (events path from
 # config; a resolution failure here must never block the exec below).
 WEFT_EVENTS="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get paths.events 2>/dev/null)" || WEFT_EVENTS=""
-[ -n "$WEFT_EVENTS" ] && echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"kind\":\"wake-exec\",\"lane\":\"$LANE\",\"tail\":\"$SID\"}" >> "$WEFT_EVENTS" 2>/dev/null || true
+# The lane's provider rides every event this script writes (providers r1),
+# resolved the way register-lane.sh resolves it.
+WEFT_PROVIDER="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get "lanes.$LANE.provider" 2>/dev/null)" || WEFT_PROVIDER=""
+[ -n "$WEFT_PROVIDER" ] || WEFT_PROVIDER=claude-code
+[ -n "$WEFT_EVENTS" ] && echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"kind\":\"wake-exec\",\"lane\":\"$LANE\",\"provider\":\"$WEFT_PROVIDER\",\"tail\":\"$SID\"}" >> "$WEFT_EVENTS" 2>/dev/null || true
 # The SessionStart hook (register-lane.sh) reads this to write the session→lane
 # registry — the id itself only exists once claude mints the forked session.
 # One spelling in the session: an inherited WEFT_LANE goes (issue #7).
@@ -310,7 +316,7 @@ LIVED=$(( $(date +%s) - LAUNCHED_AT ))
 if [ "$RC" -ne 0 ] && [ "$LIVED" -lt 20 ]; then
   if [ -n "$MODEL" ] && grep -qi "model" "$STDERR_CAP" 2>/dev/null; then
     echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE FAILED for $LANE: pinned model $MODEL unavailable (claude exited rc=$RC after ${LIVED}s; stderr: $(head -c 200 "$STDERR_CAP" | tr '\n' ' '))" >> "$WEFT_LOG"
-    [ -n "$WEFT_EVENTS" ] && echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"kind\":\"model-unavailable\",\"lane\":\"$LANE\",\"model\":\"$MODEL\",\"alarm\":true}" >> "$WEFT_EVENTS" 2>/dev/null || true
+    [ -n "$WEFT_EVENTS" ] && echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"kind\":\"model-unavailable\",\"lane\":\"$LANE\",\"provider\":\"$WEFT_PROVIDER\",\"model\":\"$MODEL\",\"alarm\":true}" >> "$WEFT_EVENTS" 2>/dev/null || true
   else
     echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE FAILED for $LANE: claude exited rc=$RC after ${LIVED}s (stderr: $(head -c 200 "$STDERR_CAP" | tr '\n' ' '))" >> "$WEFT_LOG"
   fi

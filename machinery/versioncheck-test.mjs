@@ -61,6 +61,17 @@ check('seenVersions: distinct, in file order, skipping torn lines and rows witho
   const text = rows('2.1.309', '2.1.310', null, '2.1.309') + '{"version":"2.1.3' + '\n' + JSON.stringify({ version: 7 }) + '\n' + JSON.stringify({ version: '' }) + '\n';
   assert.deepEqual(seenVersions(text), ['2.1.309', '2.1.310']);
   assert.deepEqual(seenVersions(''), []);
+});
+
+check('seenVersions: keyed per provider — a codex row never seeds or satisfies claude-code\'s set', () => {
+  const text = [
+    JSON.stringify({ version: '2.1.300' }), // a row from before provenance: claude-code by definition
+    JSON.stringify({ version: '0.9.0', provider: 'codex' }),
+    JSON.stringify({ version: '2.1.310', provider: 'claude-code' }),
+  ].join('\n');
+  assert.deepEqual(seenVersions(text), ['2.1.300', '2.1.310'], 'the default set is claude-code\'s');
+  assert.deepEqual(seenVersions(text, 'codex'), ['0.9.0']);
+  assert.deepEqual(seenVersions(text, 'claude-code'), ['2.1.300', '2.1.310']);
   assert.deepEqual(seenVersions(undefined), []);
 });
 
