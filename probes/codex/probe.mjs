@@ -60,7 +60,7 @@ const snapshot = () => Object.fromEntries(rollouts().map((f) => [f, { sha: sha(f
 
 function newDir(probe) {
   const d = join(RUN, 'results', `${probe}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
-  mkdirSync(d, { recursive: true });
+  if (SPEND) mkdirSync(d, { recursive: true }); // a dry run creates nothing under results/
   return d;
 }
 
@@ -95,7 +95,11 @@ function sourceRollout() {
   const from = flag('--from');
   if (from) return { file: resolve(from), word: flag('--word') };
   const p1 = latestP1();
-  if (!p1) { console.error('no P1 result yet: run P1 first, or pass --from <rollout> --word <code word>'); process.exit(2); }
+  if (!p1) {
+    // A dry run previews the plan with placeholders; a spend run refuses (Selvage's read, #83).
+    if (!SPEND) return { file: '<P1 rollout>', word: '<code word>', placeholder: true };
+    console.error('no P1 result yet: run P1 first, or pass --from <rollout> --word <code word>'); process.exit(2);
+  }
   return { file: p1.rollout, word: p1.codeWord };
 }
 function writePlant(src, opts) {
@@ -104,7 +108,7 @@ function writePlant(src, opts) {
   const dest = join(HOME, 'sessions', p.filename.dir, p.filename.name);
   mkdirSync(dirname(dest), { recursive: true });
   writeFileSync(dest, p.text, { flag: 'wx' });
-  return { id: p.id, file: dest, sha: sha(dest), lines: p.rows.length };
+  return { id: p.id, file: dest, sha: sha(dest), lines: p.rows.length, inflated: p.inflated };
 }
 const answers = (text, word) => typeof text === 'string' && typeof word === 'string' && text.toUpperCase().includes(word.toUpperCase());
 
@@ -131,8 +135,8 @@ const PROBES = {
   P6() {
     const { file, word } = sourceRollout();
     const dir = newDir('P6');
-    const srcSha = sha(file);
     if (!SPEND) { console.log(`  would plant from ${file} (strip token counts), then:`); codex(dir, 'p6-resume', ['exec', 'resume', '<planted-id>', ...RO, '--json', '-o', join(dir, 'p6-resume.last'), 'What was the code word I asked you to remember? Reply with the word only.']); return; }
+    const srcSha = sha(file);
     const planted = writePlant(file, { tokenCounts: 'strip' });
     const r = codex(dir, 'p6-resume', ['exec', 'resume', planted.id, ...RO, '--json', '-o', join(dir, 'p6-resume.last'), 'What was the code word I asked you to remember? Reply with the word only.']);
     const reply = lastMessage(dir, 'p6-resume');
@@ -149,7 +153,7 @@ const PROBES = {
     const dir = newDir('P8');
     const inflate = Number(flag('--inflate', '937000'));
     const ask = 'What was the code word I asked you to remember? Reply with the word only.';
-    if (!SPEND) { console.log(`  would plant two files from ${file} (one with every token total set to ${inflate}, one stripped), then resume each:`); codex(dir, 'p8-stale', ['exec', 'resume', '<stale-id>', ...RO, '--json', '-o', '…', ask]); codex(dir, 'p8-clean', ['exec', 'resume', '<clean-id>', ...RO, '--json', '-o', '…', ask]); return; }
+    if (!SPEND) { console.log(`  would plant two files from ${file} (one with each token count's total_token_usage and last_token_usage set to ${inflate}, one stripped), then resume each:`); codex(dir, 'p8-stale', ['exec', 'resume', '<stale-id>', ...RO, '--json', '-o', '…', ask]); codex(dir, 'p8-clean', ['exec', 'resume', '<clean-id>', ...RO, '--json', '-o', '…', ask]); return; }
     const out = { probe: 'P8', source: file, inflate };
     for (const [label, tokenCounts] of [['p8-stale', { inflate }], ['p8-clean', 'strip']]) {
       const planted = writePlant(file, { tokenCounts });
@@ -168,7 +172,7 @@ const PROBES = {
   // P2: fork leaves the original untouched and writes a new file.
   P2() {
     const { file } = sourceRollout();
-    const id = idFromFilename(basename(file));
+    const id = idFromFilename(basename(file)) ?? '<P1 session id>';
     const dir = newDir('P2');
     const before = snapshot();
     const r = codex(dir, 'p2-fork', ['exec', 'fork', id, ...RO, '--json', '-o', join(dir, 'p2-fork.last'), 'Reply with just: forked.']);
@@ -183,7 +187,7 @@ const PROBES = {
   // P3: plain resume appends to the original (the reason a lane never resumes its archive).
   P3() {
     const { file } = sourceRollout();
-    const id = idFromFilename(basename(file));
+    const id = idFromFilename(basename(file)) ?? '<P1 session id>';
     const dir = newDir('P3');
     const before = snapshot();
     const r = codex(dir, 'p3-resume', ['exec', 'resume', id, ...RO, '--json', '-o', join(dir, 'p3-resume.last'), 'Reply with just: resumed.']);

@@ -4,6 +4,11 @@
 // format. P1 replaces this kind of fixture with a real capture.
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { canonicalFilename, idFromFilename, kindOf, parseRollout, plant, summarize } from '../probes/codex/rollout.mjs';
 
 let failed = 0;
@@ -18,7 +23,7 @@ const fixture = [
   L({ timestamp: '2026-11-21T10:00:01.000Z', ordinal: 1, type: 'turn_context', payload: { turn_id: 't1', model: 'gpt-x' } }),
   L({ timestamp: '2026-11-21T10:00:02.000Z', ordinal: 2, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'remember: heron' }] } }),
   L({ timestamp: '2026-11-21T10:00:03.000Z', ordinal: 3, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] } }),
-  L({ timestamp: '2026-11-21T10:00:04.000Z', ordinal: 4, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 900, total_tokens: 1000 }, last_token_usage: { total_tokens: 1000 }, model_context_window: 200000 }, rate_limits: { primary: { used_percent: 3 } } } }),
+  L({ timestamp: '2026-11-21T10:00:04.000Z', ordinal: 4, type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 900, total_tokens: 1000 }, last_token_usage: { input_tokens: 400, total_tokens: 450 }, model_context_window: 200000 }, rate_limits: { primary: { used_percent: 3 } } } }),
   '{"timestamp": "torn',
   L({ timestamp: '2026-11-21T10:00:05.000Z', ordinal: 5, type: 'token_usage_record', payload: { thread_id: SRC_ID, usage: {} } }),
 ].join('\n') + '\n';
@@ -73,11 +78,15 @@ check("plant: 'keep' keeps them as the source has them", () => {
   const p = plant(rows, { id: NEW_ID, now: NOW, tokenCounts: 'keep' });
   assert.equal(p.rows.filter((r) => kindOf(r) === 'event_msg/token_count')[0].payload.info.total_token_usage.total_tokens, 1000);
 });
-check('plant: { inflate } keeps them with a planted stale total (P8)', () => {
+check('plant: { inflate } plants the stale total in BOTH total_ and last_token_usage, and says so (P8)', () => {
   const p = plant(rows, { id: NEW_ID, now: NOW, tokenCounts: { inflate: 937000 } });
-  const tc = p.rows.filter((r) => kindOf(r) === 'event_msg/token_count')[0].payload.info.total_token_usage;
-  assert.equal(tc.total_tokens, 937000);
-  assert.equal(tc.input_tokens, 937000);
+  const info = p.rows.filter((r) => kindOf(r) === 'event_msg/token_count')[0].payload.info;
+  for (const field of ['total_token_usage', 'last_token_usage']) {
+    assert.equal(info[field].total_tokens, 937000, field);
+    assert.equal(info[field].input_tokens, 937000, field);
+  }
+  assert.deepEqual(p.inflated, ['total_token_usage', 'last_token_usage']);
+  assert.deepEqual(plant(rows, { id: NEW_ID, now: NOW }).inflated, []);
 });
 check('plant: a real compacted row leads the tail; a non-compacted row is refused', () => {
   const p = plant(rows, { id: NEW_ID, now: NOW, compacted: COMPACTED });
@@ -94,6 +103,65 @@ check('plant refuses a source without session_meta first, a bad fromIndex, or an
   assert.throws(() => plant(rows, { fromIndex: 0 }), /outside/);
   assert.throws(() => plant(rows, { tokenCounts: 'nope' }), /tokenCounts/);
 });
+
+// The driver's guards, pinned (Selvage's ask on #83). Every case runs under a FAKE $HOME
+// (os.homedir() honors it), so nothing of the real user's is in reach, and no case
+// reaches a codex spawn except through --codex, which points at /usr/bin/false.
+const PROBE = join(dirname(fileURLToPath(import.meta.url)), '..', 'probes', 'codex', 'probe.mjs');
+const fake = mkdtempSync(join(tmpdir(), 'codex-probe-test-'));
+const fakeHome = join(fake, 'home-user');
+mkdirSync(join(fakeHome, '.codex'), { recursive: true });
+const env = { ...process.env, HOME: fakeHome };
+delete env.CODEX_HOME; delete env.OPENAI_API_KEY;
+const probe = (...a) => spawnSync(process.execPath, [PROBE, ...a, '--codex', '/usr/bin/false'], { env, encoding: 'utf8', timeout: 30_000 });
+const entries = (d) => readdirSync(d).sort();
+try {
+  check('guard: a run dir that resolves to the home folder is refused, and nothing is created there', () => {
+    const before = entries(fakeHome);
+    const r = probe('P1', '--run', join(fakeHome, '.codex', '..'));
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /home folder/);
+    assert.deepEqual(entries(fakeHome), before);
+  });
+  check("guard: a run dir that is the home folder's parent is refused", () => {
+    const r = probe('P1', '--run', fake);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /home folder/);
+  });
+  check('guard: a sandbox home that is a symlink to ~/.codex is refused before any codex spawn', () => {
+    const run = join(fake, 'linked-run');
+    mkdirSync(run);
+    symlinkSync(join(fakeHome, '.codex'), join(run, 'home'));
+    const r = probe('status', '--run', run);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /is ~\/\.codex/);
+    assert.deepEqual(entries(join(fakeHome, '.codex')), []);
+  });
+  check('guard: --spend on a sandbox that is not logged in is refused', () => {
+    const r = probe('P1', '--spend', '--run', join(fake, 'spend-run'));
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /not logged in/);
+    assert.equal(existsSync(join(fake, 'spend-run', 'results')), false);
+  });
+  check('control: a dry run in a scratch dir succeeds, prints its command, and writes nothing under results/', () => {
+    const run = join(fake, 'dry-run');
+    const r = probe('P1', '--run', run);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /dry run/);
+    assert.match(r.stdout, / exec --skip-git-repo-check /);
+    assert.equal(existsSync(join(run, 'results')), false);
+    assert.equal(lstatSync(join(run, 'home')).isDirectory(), true);
+  });
+  check('a dry run of a later probe before any P1 previews with placeholders instead of refusing', () => {
+    for (const p of ['P6', 'P8', 'P2', 'P3']) {
+      const r = probe(p, '--run', join(fake, `dry-${p}`));
+      assert.equal(r.status, 0, `${p}: ${r.stderr}`);
+      assert.match(r.stdout, /<P1 rollout>|<P1 session id>/, p);
+    }
+  });
+} finally {
+  rmSync(fake, { recursive: true, force: true });
+}
 
 if (failed) { console.log(`${failed} FAILED`); process.exit(1); }
 console.log('all pass');

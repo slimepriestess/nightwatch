@@ -94,7 +94,8 @@ const isTokenCount = (r) => kindOf(r) === 'event_msg/token_count';
  * - the tail: the source's lines from `fromIndex` on (a turn boundary is the
  *   caller's choice; the probe keeps whole sessions, so the default is 1).
  * - tokenCounts: 'strip' (the amended recipe), 'keep' (as the source has them),
- *   or { inflate: N } (keep them and set every total to N: P8's planted stale
+ *   or { inflate: N } (keep them and set total_token_usage AND last_token_usage
+ *   to N on each: P8's planted stale
  *   total).
  * - compacted: a REAL `compacted` row captured from codex (never synthesized
  *   here: its shape is not settled at read grade), placed first in the tail.
@@ -108,6 +109,7 @@ export function plant(rows, { id = randomUUID(), fromIndex = 1, tokenCounts = 's
   meta.timestamp = now.toISOString();
   meta.payload = { ...meta.payload, id, session_id: id, timestamp: now.toISOString() };
   for (const k of ['history_mode', 'history_base', 'forked_from_id']) delete meta.payload[k];
+  const inflated = [];
   let tail = rows.slice(fromIndex).map((r) => {
     const c = structuredClone(r);
     delete c.ordinal;
@@ -118,8 +120,13 @@ export function plant(rows, { id = randomUUID(), fromIndex = 1, tokenCounts = 's
     const n = tokenCounts.inflate;
     for (const r of tail) {
       const info = isTokenCount(r) ? r.payload?.info : null;
-      if (info?.total_token_usage && typeof info.total_token_usage === 'object') {
-        info.total_token_usage = { ...info.total_token_usage, total_tokens: n, input_tokens: n };
+      // Both fields, because which one codex seeds from is P8's question: a clean result
+      // with only one inflated could be clean for the wrong reason (Selvage's read, #83).
+      for (const field of ['total_token_usage', 'last_token_usage']) {
+        if (info?.[field] && typeof info[field] === 'object') {
+          info[field] = { ...info[field], total_tokens: n, input_tokens: n };
+          inflated.push(field);
+        }
       }
     }
   } else if (tokenCounts !== 'keep') throw new Error(`plant: tokenCounts must be 'strip', 'keep' or { inflate: N }`);
@@ -129,5 +136,5 @@ export function plant(rows, { id = randomUUID(), fromIndex = 1, tokenCounts = 's
     tail.unshift(c);
   }
   const out = [meta, ...tail];
-  return { id, rows: out, text: out.map((r) => JSON.stringify(r)).join('\n') + '\n', filename: canonicalFilename(id, now) };
+  return { id, rows: out, inflated, text: out.map((r) => JSON.stringify(r)).join('\n') + '\n', filename: canonicalFilename(id, now) };
 }
