@@ -112,6 +112,19 @@ try {
     const r = sleep(h);
     check('5 a codex lane folds its rollout, not a Claude Code transcript with the same id', r.code === 0 && lastFold(h)?.codexVersion === '0.171.0', r.err);
   }
+  // 7. The collision Selvage built on #85: the codex session's id ALSO names a Claude Code transcript in the hub's
+  //    shared transcripts folder, and that file is a continued-in pointer to another session that plausibly
+  //    contains it. Without the codex skip, the walk would redirect the fold away from the rollout.
+  {
+    const h = hub();
+    const Y = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const userRow = JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello world' }, uuid: 'u1', timestamp: '2026-11-23T10:00:00.000Z' });
+    writeFileSync(join(h.root, 'transcripts', `${SID}.jsonl`), userRow + '\n' + JSON.stringify({ type: 'continued-in', continuedInSessionId: Y }) + '\n');
+    writeFileSync(join(h.root, 'transcripts', `${Y}.jsonl`), userRow + '\n');
+    const r = sleep(h);
+    const row = lastFold(h);
+    check('7 a same-id Claude Code continued-in pointer does not redirect a codex fold', r.code === 0 && row?.provider === 'codex' && row?.source === `jsonl:${SID}`, r.err || row);
+  }
   // 6. A Claude Code lane in the same hub still folds its own transcript (the default path is untouched).
   {
     const h = hub();
