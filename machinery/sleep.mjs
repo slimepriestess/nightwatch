@@ -21,7 +21,7 @@ import { join } from 'node:path';
 
 import { loadConfig, laneConfig } from './config.mjs';
 import { resolveFoldSource, followContinued } from './deadwake.mjs';
-import { archiveTranscript, catchUpArchive } from './archive.mjs';
+import { archiveTranscript, archiveRollout, catchUpArchive } from './archive.mjs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Code finds code beside ITSELF (the machinery dir), never in the hub's
@@ -59,6 +59,30 @@ const lane = flag('--lane', CFG.defaultLane);
 // instead of a hardcoded lane name in the daemon.
 const laneCfg = laneConfig(CFG, lane);
 const PROVIDER = laneCfg.provider; // every persisted row names its provider (providers r1)
+// A codex lane (anima_dev/nightwatch_codex_lane_plan.md, leg 1): its rollouts live under its own CODEX_HOME,
+// named rollout-<time>-<id>.jsonl in sessions/YYYY/MM/DD. Claude Code's continued-in and dead-wake rules are
+// about Claude Code's transcripts and are skipped, with a line saying so.
+const CODEX = PROVIDER === 'codex';
+if (CODEX && !laneCfg.codexHome) {
+  console.error(`sleep.mjs: lane ${lane} is a codex lane with no codexHome in the config — refusing (its rollouts live there).`);
+  process.exit(2);
+}
+// The rollout for a session id under <codexHome>/sessions, newest name first; a compressed one (.jsonl.zst) is
+// returned as found, and trim refuses it by name.
+function findRollout(sid) {
+  const root = join(laneCfg.codexHome.replace(/^~(?=\/)/, homedir()), 'sessions');
+  const hits = [];
+  const walk = (d, depth) => {
+    let es = [];
+    try { es = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of es) {
+      if (e.isDirectory() && depth < 3) walk(join(d, e.name), depth + 1);
+      else if (e.isFile() && e.name.startsWith('rollout-') && (e.name.endsWith(`-${sid}.jsonl`) || e.name.endsWith(`-${sid}.jsonl.zst`))) hits.push(join(d, e.name));
+    }
+  };
+  walk(root, 0);
+  return hits.sort().pop() ?? null;
+}
 const laneTarget = args.includes('--emergency') && laneCfg.emergencyTargetTokens
   ? laneCfg.emergencyTargetTokens : laneCfg.targetTokens;
 const target = Number(flag('--target-tokens', String(laneTarget)));
@@ -229,7 +253,8 @@ visible.sort((a, b) => levelNum(b.level) - levelNum(a.level));
 // Before the dead-wake walk: that one goes back to the session a wake came
 // from, this one forward to where a resumed conversation went. See
 // followContinued in deadwake.mjs.
-const continued = followContinued(sessionId, { transcripts: CFG.paths.transcripts });
+const continued = CODEX ? { followed: [], sid: sessionId } : followContinued(sessionId, { transcripts: CFG.paths.transcripts });
+if (CODEX) console.error('sleep.mjs: codex lane: continued-in and dead-wake are Claude Code rules; folding the named session as it is.');
 if (continued.followed.length) {
   console.error(`sleep.mjs: RESUMED — ${[...continued.followed, continued.sid].map((s) => s.slice(0, 8)).join(' → ')} (continued-in); folding ${continued.sid.slice(0, 8)}, the newest.`);
   sessionId = continued.sid;
@@ -245,7 +270,7 @@ if (continued.refused) {
 // harness's head inside what a fold would keep; refolding it made each wake
 // worse on 2026-10-08. Every fold path lands here, so none can carry a dead
 // wake forward. See deadwake.mjs and anima_dev/nightwatch_incident_2026-10-08_prompt_too_long.md.
-const deadWake = resolveFoldSource(sessionId, { transcripts: CFG.paths.transcripts, foldsPath: join(LADDER, 'folds.jsonl') });
+const deadWake = CODEX ? { skipped: [], sid: sessionId } : resolveFoldSource(sessionId, { transcripts: CFG.paths.transcripts, foldsPath: join(LADDER, 'folds.jsonl') });
 if (deadWake.skipped.length) {
   console.error(`sleep.mjs: DEAD WAKE — ${deadWake.skipped.map((s) => s.slice(0, 8)).join(' → ')} never got a turn in; folding ${deadWake.sid.slice(0, 8)} (the last session that ran) instead.`);
   sessionId = deadWake.sid;
@@ -258,7 +283,8 @@ if (deadWake.skipped.length) {
 // the wrong story: nothing happened, so nothing is lost. Write a fresh-start
 // receipt (wake.sh's firstWake mode) and no fold row — a fold that didn't
 // happen never gets a row (the house doesn't fake receipts).
-if (!existsSync(join(CFG.paths.transcripts, `${sessionId}.jsonl`))) {
+const SRC = CODEX ? findRollout(sessionId) : join(CFG.paths.transcripts, `${sessionId}.jsonl`);
+if (!SRC || !existsSync(SRC)) {
   const registered = existsSync(join(WEFT, 'wakecycle', `lane.${sessionId}`));
   if (registered) {
     console.error(`sleep.mjs: session ${sessionId.slice(0, 8)} has no transcript — a zero-turn day. Nothing to fold; writing a fresh-start receipt (the morning wakes a new session).`);
@@ -278,7 +304,9 @@ try {
   trimOut = JSON.parse(
     // process.execPath, not 'node': when this runs as the daemon's orphan
     // fold, the parent is launchd-spawned and PATH has no node (E review).
-    execFileSync(process.execPath, [join(MACHINERY_DIR, 'trim.mjs'), sessionId, '--target-tokens', String(target)], { encoding: 'utf8' }),
+    execFileSync(process.execPath, CODEX
+      ? [join(MACHINERY_DIR, 'trim.mjs'), SRC, '--provider', 'codex', '--target-tokens', String(target)]
+      : [join(MACHINERY_DIR, 'trim.mjs'), sessionId, '--target-tokens', String(target)], { encoding: 'utf8' }),
   );
 } catch (e) {
   const why = e.stderr?.toString().trim() || e.message;
@@ -302,7 +330,15 @@ try {
 // loud and recorded in the fold row, but never fails the fold: the tail is
 // already written, and tomorrow's wake needs it more than the archive.
 let archived;
-try {
+if (CODEX) {
+  try {
+    archived = archiveRollout(sessionId, SRC, { archive: CFG.paths.transcriptArchive });
+    if (archived.keptAside) console.error(`archive: the rollout of ${sessionId.slice(0, 8)} is SMALLER than its archived copy; kept the old copy aside as ${archived.keptAside}`);
+  } catch (e) {
+    archived = { error: e.message };
+    console.error(`ARCHIVE FAILED for session ${sessionId.slice(0, 8)}: ${e.message} — the fold continues; its rollout is not in ${CFG.paths.transcriptArchive}.`);
+  }
+} else try {
   const paths = { transcripts: CFG.paths.transcripts, archive: CFG.paths.transcriptArchive };
   // Subagent problems are said, never thrown (archive.mjs): the session's
   // own copy doesn't depend on them.
@@ -374,6 +410,7 @@ appendFileSync(
     ...(trimOut.overshoot ? { overshoot: trimOut.overshoot } : {}),
     ...(trimOut.tornLines ? { tornLines: trimOut.tornLines } : {}),
     ...(trimOut.claudeVersion ? { claudeVersion: trimOut.claudeVersion } : {}),
+    ...(trimOut.codexVersion ? { codexVersion: trimOut.codexVersion } : {}),
     tail: trimOut.newSessionId,
     ...(continued.followed.length ? { continuedFrom: continued.followed } : {}),
     ...(deadWake.skipped.length ? { deadWakesSkipped: deadWake.skipped } : {}),

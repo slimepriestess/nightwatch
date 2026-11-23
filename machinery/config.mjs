@@ -396,6 +396,8 @@ export function wakePromptProblem(v) {
 const LANE_KEYS = {
   targetTokens: 'number', emergencyTargetTokens: 'number', contextWindow: 'number',
   switchboard: 'boolean', cwdMarker: 'string', runtime: 'string', modelName: 'string',
+  // A codex lane's own CODEX_HOME (its rollouts live under <codexHome>/sessions; its login is the person's).
+  codexHome: 'string',
   // An agent's chosen given name: display only (alert labels, card heading,
   // strip and log labels). The lane KEY stays the routing/plumbing id.
   given: 'string',

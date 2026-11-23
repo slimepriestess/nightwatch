@@ -35,6 +35,17 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, s
 import { join } from 'node:path';
 
 /** Copy one session's transcript, and its subagents', into the archive. Returns what it did. */
+/**
+ * A Codex lane's rollout, archived by COPY under <archive>/<sid>.jsonl; the original stays where Codex put it,
+ * because a paginated fork points at its parent's file by byte offset (anima_dev/nightwatch_codex_lane_plan.md,
+ * leg 1; probe P2). Same grow-only rule as a Claude Code transcript. A Codex rollout has no subagent folder.
+ */
+export function archiveRollout(sid, src, { archive }) {
+  if (!existsSync(src)) return { sid, skipped: 'no rollout' };
+  mkdirSync(archive, { recursive: true });
+  return { sid, ...copyGrown(src, join(archive, `${sid}.jsonl`)) };
+}
+
 export function archiveTranscript(sid, { transcripts, archive }) {
   const src = join(transcripts, `${sid}.jsonl`);
   if (!existsSync(src)) return { sid, skipped: 'no transcript' };
