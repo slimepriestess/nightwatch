@@ -38,12 +38,26 @@ import { join } from 'node:path';
 
 import { loadConfig } from './config.mjs';
 import { trimTail } from './trim-core.mjs';
-import * as adapter from './providers/claude-code.mjs';
+import * as claudeCode from './providers/claude-code.mjs';
+import * as codex from './providers/codex.mjs';
 
 const args = process.argv.slice(2);
-const src = args.find((a) => !a.startsWith('--'));
-const target = Number((args.find((a) => a.startsWith('--target-tokens')) ?? '').split('=')[1] || args[args.indexOf('--target-tokens') + 1] || 250_000);
+const src = args.find((a, i) => !a.startsWith('--') && !['--target-tokens', '--image-budget-bytes', '--provider'].includes(args[i - 1]));
+// Both spellings. Without the flag the target is 250,000: the old expression read args[indexOf(-1) + 1], the
+// transcript's own path, so the default was NaN and every flagless run refused ("no human prompt found").
+const tgtEq = args.find((a) => a.startsWith('--target-tokens='));
+const tgtArg = args.indexOf('--target-tokens');
+const target = Number(tgtEq !== undefined ? tgtEq.split('=')[1] : tgtArg >= 0 ? args[tgtArg + 1] : 250_000);
+if (!Number.isFinite(target) || target <= 0) { console.error('trim: --target-tokens takes a number of tokens, more than 0'); process.exit(2); }
 const dry = args.includes('--dry');
+// Which runtime wrote the transcript (lane.provider; anima_dev/nightwatch_providers_design.md §4). Both
+// spellings, as --target-tokens takes them. Without the flag it is claude-code, as every lane was before.
+const provEq = args.find((a) => a.startsWith('--provider='));
+const provArg = args.indexOf('--provider');
+const PROVIDER = provEq !== undefined ? provEq.split('=')[1] : provArg >= 0 ? args[provArg + 1] : 'claude-code';
+const ADAPTERS = { 'claude-code': claudeCode, codex };
+const adapter = ADAPTERS[PROVIDER];
+if (!adapter) { console.error(`trim: no adapter for provider ${JSON.stringify(PROVIDER)} (known: ${Object.keys(ADAPTERS).join(', ')})`); process.exit(2); }
 // Both spellings, as --target-tokens takes them: `--image-budget-bytes N` and `--image-budget-bytes=N`.
 const imgEq = args.find((a) => a.startsWith('--image-budget-bytes='));
 const imgArg = args.indexOf('--image-budget-bytes');
@@ -59,6 +73,14 @@ if (!src) {
 // transcripts folder, so only then is a hub config required: since #7 (A2)
 // a missing config is an error, and loading it up front refused path runs
 // that touch no hub (trim-test's, and any by hand).
+if (PROVIDER === 'codex' && !existsSync(src)) {
+  console.error(`trim: a codex rollout is named by its path (no rollout at ${src})`);
+  process.exit(2);
+}
+if (PROVIDER === 'codex' && src.endsWith('.zst')) {
+  console.error('trim: this rollout is compressed (.jsonl.zst, Codex compresses rollouts older than 7 days); the codex adapter reads plain .jsonl only');
+  process.exit(2);
+}
 const srcPath = existsSync(src) ? src : join(loadConfig().paths.transcripts, `${src}.jsonl`);
 if (!existsSync(srcPath)) {
   console.error(`no transcript at ${srcPath}`);
