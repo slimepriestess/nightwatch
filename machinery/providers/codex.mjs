@@ -173,6 +173,10 @@ export function validate(keptLines) {
   if (rows.filter((r) => kindOf(r) === 'session_meta').length > 1) problems.push('more than one session_meta');
   const counts = rows.filter((r) => kindOf(r) === 'event_msg/token_count').length;
   if (counts) problems.push(`${counts} event_msg/token_count row(s) kept (a stale count seeds the woken session: P8)`);
+  // Defense in depth: drop() removes these, so only a tail built some other way could carry one; whether resume
+  // seeds from it is unestablished, and a wall costs nothing (Selvage's read, #84).
+  const records = rows.filter((r) => kindOf(r) === 'token_usage_record').length;
+  if (records) problems.push(`${records} token_usage_record row(s) kept (usage accounting does not travel)`);
   if (rows.some((r) => r && 'ordinal' in r)) problems.push('a kept row still carries an ordinal');
   const start = rows.findIndex((r) => isSeam(r) || kindOf(r) === 'compacted');
   if (start < 0) problems.push('no turn start (task_started) or compacted row in the tail');

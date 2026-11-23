@@ -96,6 +96,8 @@ check('validate passes the folded tail and refuses each thing P6/P8 showed a wak
   assert.deepEqual(codex.validate(good), []);
   const tc = TWO.find((l) => kind(l) === 'event_msg/token_count');
   assert.match(codex.validate([...good, tc]).join(';'), /token_count/);
+  const ur = TWO.find((l) => kind(l) === 'token_usage_record');
+  assert.match(codex.validate([...good, ur]).join(';'), /token_usage_record/);
   assert.match(codex.validate(edit(good, 3, (e) => ({ ...e, ordinal: 3 }))).join(';'), /ordinal/);
   for (const f of ['history_mode', 'history_base', 'forked_from_id']) {
     assert.match(codex.validate(edit(good, 0, (e) => ({ ...e, payload: { ...e.payload, [f]: 'x' } }))).join(';'), new RegExp(f));

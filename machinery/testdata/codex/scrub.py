@@ -4,6 +4,8 @@
 Keeps every row, every key and every row's type, order and ordinal; replaces what
 identifies a person or a machine, and shortens long text bodies, so the fixture
 carries Codex's FORMAT (what the adapter reads) and none of its content.
+Kept on purpose: session and thread UUIDs, item ids, timestamps and content hashes. They are minted
+locally by Codex, link to no account, and the adapter reads the ids (filenames, headers).
 Usage: scrub.py <in.jsonl> <out.jsonl>
 """
 import json, re, sys
