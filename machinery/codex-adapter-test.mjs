@@ -155,7 +155,9 @@ check('images: an older data: image past the budget becomes text; the newest sta
 // The command, on a scratch copy of the fixture laid out as a sessions tree.
 const TRIM = join(HERE, 'trim.mjs');
 const scratch = mkdtempSync(join(tmpdir(), 'codex-adapter-test-'));
-const day = join(scratch, 'sessions', '2026', '11', '23');
+// A long-past day folder, so the fold's own day folder (today's) never exists beforehand: the write must create it
+// (CI went red at 00:56Z on 11/24, the first run after UTC midnight, when it didn't).
+const day = join(scratch, 'sessions', '2020', '01', '01');
 mkdirSync(day, { recursive: true });
 const SRC = join(day, 'rollout-2026-11-23T11-17-02-01a209d7-1979-7202-8277-799c4198fdf9.jsonl');
 copyFileSync(join(FX, 'two-turns.jsonl'), SRC);
