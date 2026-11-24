@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -151,6 +151,24 @@ try {
     assert.match(r.stdout, / exec --skip-git-repo-check /);
     assert.equal(existsSync(join(run, 'results')), false);
     assert.equal(lstatSync(join(run, 'home')).isDirectory(), true);
+  });
+  // P4 plants AGENTS.md in the shared work dir; it must leave the dir as it found it. /usr/bin/true stands in
+  // for a logged-in codex that answers every call (status 0, no output), so the spend path runs, offline.
+  const p4 = (run) => spawnSync(process.execPath, [PROBE, 'P4', '--spend', '--run', run, '--codex', '/usr/bin/true'], { env, encoding: 'utf8', timeout: 30_000 });
+  check('P4 removes the AGENTS.md it planted', () => {
+    const run = join(fake, 'p4-clean');
+    const r = p4(run);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /"probe": "P4"/);
+    assert.equal(existsSync(join(run, 'work', 'AGENTS.md')), false);
+  });
+  check('P4 puts back an AGENTS.md that was there before it', () => {
+    const run = join(fake, 'p4-prior');
+    mkdirSync(join(run, 'work'), { recursive: true });
+    writeFileSync(join(run, 'work', 'AGENTS.md'), 'the operator\'s own file\n');
+    const r = p4(run);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(join(run, 'work', 'AGENTS.md'), 'utf8'), 'the operator\'s own file\n');
   });
   check('a dry run of a later probe before any P1 previews with placeholders instead of refusing', () => {
     for (const p of ['P6', 'P8', 'P2', 'P3']) {
