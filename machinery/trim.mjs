@@ -32,9 +32,9 @@
  * trimming is trim-core.mjs, and everything it knows about Claude Code's transcript is
  * providers/claude-code.mjs (PR A of anima_dev/nightwatch_providers_design.md).
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 import { loadConfig } from './config.mjs';
 import { trimTail } from './trim-core.mjs';
@@ -101,6 +101,9 @@ const report = adapter.report({ ...result.facts, newId, path: outPath });
 if (dry) {
   report.dry = true;
 } else {
+  // A codex rollout goes in today's sessions/YYYY/MM/DD folder, which Codex creates only when it writes there
+  // itself; a fold after midnight finds none (main went red at 00:56Z 11/24). A Claude Code tail's folder exists.
+  mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, out);
 }
 console.log(JSON.stringify(report, null, 2));

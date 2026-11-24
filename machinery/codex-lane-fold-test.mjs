@@ -30,7 +30,8 @@ function hub({ codexHome = true, register = true } = {}) {
   writeFileSync(join(root, 'ladder', 'folds.jsonl'), '');
   writeFileSync(join(root, 'ladder', 'L2', `${today}-test.md`), `---\nid: test-${today}\nlevel: L2\n---\n\n## Sequence\n\nA day.\n`);
   const home = join(root, 'codex-home');
-  const day = join(home, 'sessions', '2026', '11', '23');
+  // A long-past day folder: the fold writes into today's, which must be created (main went red at 00:56Z 11/24).
+  const day = join(home, 'sessions', '2020', '01', '01');
   mkdirSync(day, { recursive: true });
   const src = join(day, `rollout-2026-11-23T11-17-02-${SID}.jsonl`);
   copyFileSync(join(HERE, 'testdata', 'codex', 'two-turns.jsonl'), src);
