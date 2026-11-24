@@ -17,7 +17,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { idFromFilename, parseRollout, plant, summarize } from './rollout.mjs';
@@ -208,10 +208,18 @@ const PROBES = {
     const dir = newDir('P4');
     const agents = join(WORK, 'AGENTS.md');
     const A = `Probe marker A ${randomBytes(3).toString('hex')}.`, B = `Probe marker B ${randomBytes(3).toString('hex')}.`;
-    if (SPEND) writeFileSync(agents, A + '\n');
-    const a = codex(dir, 'p4-prompt-a', ['debug', 'prompt-input', '-c', 'sandbox_mode="read-only"', 'probe']);
-    if (SPEND) writeFileSync(agents, B + '\n');
-    const b = codex(dir, 'p4-prompt-b', ['debug', 'prompt-input', '-c', 'sandbox_mode="read-only"', 'probe']);
+    // The work dir is shared by every later probe and session, so the planted file must not outlive this one
+    // (11/23: a leftover AGENTS.md was read by a later session). Put back whatever was there, or remove it.
+    const prior = existsSync(agents) ? readFileSync(agents) : null;
+    let a, b;
+    try {
+      if (SPEND) writeFileSync(agents, A + '\n');
+      a = codex(dir, 'p4-prompt-a', ['debug', 'prompt-input', '-c', 'sandbox_mode="read-only"', 'probe']);
+      if (SPEND) writeFileSync(agents, B + '\n');
+      b = codex(dir, 'p4-prompt-b', ['debug', 'prompt-input', '-c', 'sandbox_mode="read-only"', 'probe']);
+    } finally {
+      if (SPEND) { if (prior) writeFileSync(agents, prior); else rmSync(agents, { force: true }); }
+    }
     if (!a || !b) return;
     const verdict = { probe: 'P4', note: 'prompt-input renders a NEW session; the resumed-session half needs a spend run (P4 resume, not built yet)',
       markerAInA: a.stdout.includes(A), markerBInB: b.stdout.includes(B), markerAInB: b.stdout.includes(A) };
