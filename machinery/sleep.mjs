@@ -16,7 +16,6 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, copyFileSync, statSync, readdirSync } from 'node:fs';
 import { rungHealth } from './rung-health.mjs';
 import { execFileSync } from 'node:child_process';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadConfig, laneConfig } from './config.mjs';

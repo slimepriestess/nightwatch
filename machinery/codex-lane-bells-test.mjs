@@ -6,10 +6,10 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { codexBinFor, codexLiveSessions, codexQuietMs, findRollout, isCodexSession, queueBell, BELL_PREFIX } from './codexlane.mjs';
+import { codexBellPlan, codexBinFor, codexLiveSessions, codexQuietMs, findRollout, isCodexSession, queueBell, BELL_PREFIX } from './codexlane.mjs';
 
 const MACHINERY = dirname(fileURLToPath(import.meta.url));
 let pass = 0, fail = 0;
@@ -45,11 +45,35 @@ try {
     const wc = scratch('wc');
     const live = stand('codex', ['resume', SID]), daemon = stand('codex', ['app-server', '--managed-daemon']), other = stand('sleeper'), claudeish = stand('codex');
     await new Promise((r) => setTimeout(r, 300));
-    const row = (sid, pid, provider = 'codex') => writeFileSync(join(wc, `lane.${sid}`), JSON.stringify({ lane: 'lark', pid, provider }));
+    const row = (sid, pid, provider = 'codex', at = new Date().toISOString()) => writeFileSync(join(wc, `lane.${sid}`), JSON.stringify({ lane: 'lark', pid, provider, at }));
     row(SID, live.pid); row('sid-daemon', daemon.pid); row('sid-recycled', other.pid); row('sid-dead', 999999); row('sid-claude', claudeish.pid, 'claude-code');
     const got = codexLiveSessions(wc).map((s) => s.sessionId);
     assert.deepEqual(got, [SID]);
     assert.equal(codexLiveSessions(wc)[0].provider, 'codex');
+  });
+  await check('a pid recycled onto ANOTHER codex session is not this row\'s session: the process is younger than the row (Sonnet\'s #89 read)', async () => {
+    const wc = scratch('wc2'); const p = stand('codex', ['resume', 'some-other-session']); await new Promise((r) => setTimeout(r, 300));
+    writeFileSync(join(wc, 'lane.sid-week-old'), JSON.stringify({ lane: 'lark', pid: p.pid, provider: 'codex', at: new Date(Date.now() - 7 * 86400e3).toISOString() }));
+    writeFileSync(join(wc, 'lane.sid-no-at'), JSON.stringify({ lane: 'lark', pid: p.pid, provider: 'codex' }));
+    assert.deepEqual(codexLiveSessions(wc), [], 'a week-old row, and a row with no time, name no live session');
+    writeFileSync(join(wc, `lane.${SID}`), JSON.stringify({ lane: 'lark', pid: p.pid, provider: 'codex', at: new Date().toISOString() }));
+    assert.deepEqual(codexLiveSessions(wc).map((s) => s.sessionId), [SID]);
+  });
+  await check('two rows on one pid (a second session in the process): the newest row is the session', async () => {
+    const wc = scratch('wc3'); const p = stand('codex', ['resume', SID]); await new Promise((r) => setTimeout(r, 300));
+    const t = Date.now();
+    // directory order is name order here: the newest row is read last and the oldest first, so first-seen can't pass
+    const at = (ms) => JSON.stringify({ lane: 'lark', pid: p.pid, provider: 'codex', at: new Date(t + ms).toISOString() });
+    writeFileSync(join(wc, 'lane.sid-a'), at(0)); writeFileSync(join(wc, 'lane.sid-b'), at(1000)); writeFileSync(join(wc, 'lane.sid-c'), at(2000));
+    assert.deepEqual(codexLiveSessions(wc).map((s) => s.sessionId), ['sid-c']);
+  });
+  await check('the bell\'s plan: queue to a running session; skip one whose pid is gone; fail with no codexHome', () => {
+    const wc = scratch('wc4');
+    writeFileSync(join(wc, `lane.${SID}`), JSON.stringify({ lane: 'lark', pid: 999999, provider: 'codex', at: new Date().toISOString() }));
+    assert.deepEqual(codexBellPlan({ sessionId: SID, codexHome: '/h', live: codexLiveSessions(wc) }), { act: 'skip', why: 'not-live' });
+    const live = [{ pid: 4, sessionId: SID, provider: 'codex' }];
+    assert.deepEqual(codexBellPlan({ sessionId: SID, codexHome: '/h', live }), { act: 'queue' });
+    assert.deepEqual(codexBellPlan({ sessionId: SID, codexHome: undefined, live }), { act: 'fail', why: 'no codexHome' });
   });
   await check('quiet is the rollout\'s age; no rollout is null (unknown), never Infinity', () => {
     const home = scratch('home');
@@ -58,6 +82,11 @@ try {
     assert.ok(q >= 599_000 && q < 660_000, String(q));
     assert.equal(codexQuietMs(home, 'no-such-session'), null);
     assert.equal(findRollout(home, 'no-such-session'), null);
+    // two rollouts for one id (a resumed session's newer file): the newest is the one read
+    const older = rollout(home, 'twice', 0);
+    const d2 = join(home, 'sessions', '2020', '01', '02'); mkdirSync(d2, { recursive: true });
+    const newer = join(d2, 'rollout-2020-01-02T00-00-00-twice.jsonl'); writeFileSync(newer, '{}\n');
+    assert.equal(findRollout(home, 'twice'), newer, `not ${older}`);
   });
   await check('the bell is `codex queue --thread <id>` in the lane\'s CODEX_HOME, prefixed as the machinery\'s', () => {
     const d = scratch('q'); const stub = join(d, 'codex-stub');
@@ -66,6 +95,9 @@ try {
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.deepEqual(readFileSync(join(d, 'argv'), 'utf8').trimEnd().split('\n'), ['queue', '--thread', SID, '--message', `${BELL_PREFIX} the ritual`]);
     assert.equal(readFileSync(join(d, 'home'), 'utf8'), join(d, 'h'));
+    // a codexHome written as ~/… reaches codex expanded (a literal ~ would be a folder named ~)
+    queueBell({ codexBin: stub, codexHome: '~/.nw-test-codex-home', sessionId: SID, text: 'x' });
+    assert.equal(readFileSync(join(d, 'home'), 'utf8'), join(homedir(), '.nw-test-codex-home'));
     const bad = join(d, 'codex-fails'); writeFileSync(bad, '#!/bin/sh\necho "no such thread" >&2\nexit 3\n'); chmodSync(bad, 0o755);
     const f = queueBell({ codexBin: bad, codexHome: d, sessionId: SID, text: 'x' });
     assert.equal(f.ok, false); assert.equal(f.status, 3); assert.match(f.stderr, /no such thread/);
@@ -80,7 +112,7 @@ try {
   // ---------------- the real nightshift, on a scratch hub ----------------
   const pad = (n) => String(n).padStart(2, '0');
   const hm = (offsetMin) => { const t = new Date(Date.now() + offsetMin * 60_000); return `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`; };
-  function hub({ codexHome = true, state = null, nextWakeAgeMs = null, graceMs = 0, claudeTranscript = null } = {}) {
+  function hub({ codexHome = true, state = null, nextWakeAgeMs = null, graceMs = 0, claudeTranscript = null, armed = true } = {}) {
     const root = scratch('hub');
     for (const d of ['wakecycle', 'ladder', 'projects', 'codex-home', 'bin', 'spool']) mkdirSync(join(root, d), { recursive: true });
     const stub = join(root, 'bin', 'codex-stub');
@@ -97,7 +129,7 @@ try {
     // a Claude Code transcript that happens to carry the codex session's id (#85's collision): Claude's readers must not judge a codex session by it
     if (claudeTranscript) writeFileSync(join(root, 'projects', `${SID}.jsonl`), claudeTranscript.map((e) => JSON.stringify(e)).join('\n') + '\n');
     const get = (k) => spawnSync(process.execPath, [join(MACHINERY, 'config.mjs'), 'get', k], { env: envOf(root, cfgFile), encoding: 'utf8' }).stdout.trim();
-    writeFileSync(get('paths.armedFile'), 'lark\n');
+    writeFileSync(get('paths.armedFile'), armed ? 'lark\n' : '');
     if (state) writeFileSync(get('paths.stateFile'), JSON.stringify({ lark: state }));
     if (nextWakeAgeMs != null) {
       const nw = join(get('paths.wakecycle'), 'next-wake.lark.json'); writeFileSync(nw, JSON.stringify({ lane: 'lark', sessionId: 'x' }));
@@ -191,6 +223,24 @@ try {
       assert.equal(/WOULD orphan-fold lark/.test(r.stdout), want, r.stdout.split('\n').filter((l) => /WOULD|decision/.test(l)).join(' | ') || '(no decision lines)');
     });
   }
+  await check('QUIET UNKNOWN: belled past the grace, the session\'s rollout can\'t be found: said once, as an alarm (Sonnet\'s #89 read)', async () => {
+    for (const [what, age, want, graceMs] of [['no rollout', null, true, 0], ['a rollout', 0, false, 0], ['no rollout, still inside an hour\'s grace', null, false, 3600_000]]) {
+      const h = hub({ state: { belledAt: Date.now() - 30 * 60_000, belledSession: SID }, nextWakeAgeMs: 2 * 3600_000, graceMs });
+      const p = stand('codex', ['resume', SID]); await new Promise((r) => setTimeout(r, 300)); register(h, SID, p.pid);
+      if (age !== null) rollout(h.home, SID, age);
+      const r = nightshift(h, '--preflight');
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.equal(/\[decision\] QUIET UNKNOWN: lark codex session 019a0000/.test(r.stdout), want, `${what}: ${r.stdout.split('\n').filter((l) => /decision|WOULD/.test(l)).join(' | ')}`);
+    }
+  });
+  await check('QUIET UNKNOWN on a refresh: the old session can\'t read quiet, so the refresh would wait forever: said', async () => {
+    // an unarmed lane is ticked for its refresh at any hour (a Fold now's refresh)
+    const h = hub({ state: { refreshWake: true, refreshFrom: SID }, nextWakeAgeMs: 60_000, armed: false });
+    const p = stand('codex', ['resume', SID]); await new Promise((r) => setTimeout(r, 300)); register(h, SID, p.pid);
+    const r = nightshift(h, '--preflight');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /\[decision\] QUIET UNKNOWN: lark codex session 019a0000.*the refresh can't close it/);
+  });
 } finally {
   for (const p of procs) { try { p.kill(); } catch {} }
   for (const r of roots) rmSync(r, { recursive: true, force: true });

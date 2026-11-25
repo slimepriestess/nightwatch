@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { providerOf, configEnv, contextOfEntries, loadConfig, reloadConfig, switchboardLane } from './config.mjs';
 import { cannotAnswer, liveTranscriptPath } from './deadwake.mjs';
-import { codexBinFor, codexLiveSessions, codexQuietMs, queueBell } from './codexlane.mjs';
+import { codexBellPlan, codexBinFor, codexLiveSessions, codexQuietMs, queueBell } from './codexlane.mjs';
 import { claudeVersionLines, flagLines, nodeLines, nodeRealIo, realIo as claudeVersionIo, wakePromptLines } from './versioncheck.mjs';
 
 const HOME = homedir();
@@ -461,15 +461,16 @@ function ringBell(lane, sessionId, source, midday) {
 // orphan floor, as a Claude Code lane with no watcher armed does.
 function ringCodexBell(lane, sessionId, ritual, source, midday) {
   const sid8 = sessionId.slice(0, 8);
-  if (!codexLiveSessions(WAKECYCLE).some((s) => s.sessionId === sessionId)) {
-    log(`no bell for ${lane}: codex session ${sid8}… isn't running — a queued message would wait for a later session; the orphan floor holds`);
-    emitEvent('bell-unheard', { lane, session: sessionId, reason: 'not-live' });
+  const home = CFG.lanes?.[lane]?.codexHome;
+  const plan = codexBellPlan({ sessionId, codexHome: home, live: codexLiveSessions(WAKECYCLE) });
+  if (plan.act === 'skip') {
+    log(`no bell for ${lane}: codex session ${sid8}… isn't running — a queued message would wait for a later session; the orphan floor holds while its rollout can be read`);
+    emitEvent('bell-unheard', { lane, session: sessionId, reason: plan.why });
     return;
   }
-  const home = CFG.lanes?.[lane]?.codexHome;
-  if (!home) {
+  if (plan.act === 'fail') {
     log(`bell FAILED for ${lane}: a codex lane with no codexHome in the config — nowhere to queue it`);
-    emitEvent('bell-failed', { lane, error: 'no codexHome', alarm: true });
+    emitEvent('bell-failed', { lane, error: plan.why, alarm: true });
     return;
   }
   const r = queueBell({ codexBin: codexBinFor(CFG.paths?.codexBin), codexHome: home, sessionId, text: ritual });
@@ -535,6 +536,8 @@ const io = {
   sessionStartedAt,
   ringBell,
   quietMs: transcriptQuietMs,
+  // a codex session whose quiet can't be read (no rollout under its CODEX_HOME, or no codexHome): it reads never quiet
+  quietUnknown: (sessionId) => { const cx = codexOf(sessionId); return !!cx && (!cx.home || codexQuietMs(cx.home, sessionId) === null); },
   nextWakeMtime: (lane) => {
     const nw = join(WAKECYCLE, `next-wake.${lane}.json`);
     return existsSync(nw) ? statSync(nw).mtimeMs : 0;
@@ -779,6 +782,13 @@ function tickWith(io) {
       // refresh never closes anything again.
       if (laneState.refreshFrom) {
         const old = io.liveSessions().find((x) => x.sessionId === laneState.refreshFrom);
+        if (old && laneState.quietUnknownRefresh !== old.sessionId && io.quietUnknown?.(old.sessionId)) {
+          // its quiet can't be read, so this close never comes and the lane never refreshes: say so, once
+          io.log(`QUIET UNKNOWN: ${lane} codex session ${old.sessionId.slice(0, 8)}… has no readable rollout (or its lane no codexHome) — the refresh can't close it; close it by hand`);
+          io.emit('quiet-unknown', { lane, session: old.sessionId, refresh: true, alarm: true });
+          laneState.quietUnknownRefresh = old.sessionId;
+          io.saveState(st);
+        }
         if (old) {
           if (nwMtime > 0 && io.quietMs(old.sessionId) >= QUIET_MS) {
             io.log(`closing ${lane} panel for refresh (pid ${old.pid}, session ${old.sessionId.slice(0, 8)}…)`);
@@ -821,6 +831,16 @@ function tickWith(io) {
     // floor must follow the BELL's own clock. Only ringing the scheduled
     // bell stays window-gated above.
     {
+      // A codex session whose quiet can't be read (no rollout found, or no codexHome) never reads quiet, so it is never
+      // closed or orphan-folded: said once per bell, past the orphan grace (Sonnet's #89 read: it was silent).
+      if (laneState.belledAt && laneState.belledSession && now - laneState.belledAt <= WINDOW_GAP_MS
+          && now - laneState.belledAt >= ORPHAN_GRACE && (laneState.quietUnknownAt ?? 0) < laneState.belledAt
+          && io.quietUnknown?.(laneState.belledSession)) {
+        io.log(`QUIET UNKNOWN: ${lane} codex session ${laneState.belledSession.slice(0, 8)}… has no readable rollout (or its lane no codexHome) — it can't read quiet, so the nightshift won't close or orphan-fold it; fold it by hand`);
+        io.emit('quiet-unknown', { lane, session: laneState.belledSession, alarm: true });
+        laneState.quietUnknownAt = now;
+        io.saveState(st);
+      }
       // Close: only after the lane's latest bell, only once the session has
       // actually slept (next-wake written AFTER the bell) and gone quiet.
       if (live.length && laneState.belledAt && now - laneState.belledAt <= WINDOW_GAP_MS
