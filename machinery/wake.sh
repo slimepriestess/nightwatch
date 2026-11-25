@@ -73,12 +73,12 @@ NEXT="$STATE_DIR/next-wake.$LANE.json"
 WEFT_PROVIDER="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get "lanes.$LANE.provider" 2>/dev/null)" || WEFT_PROVIDER=""
 [ -n "$WEFT_PROVIDER" ] || WEFT_PROVIDER=claude-code
 # A codex lane (anima_dev/nightwatch_codex_lane_plan.md, leg 2) wakes with `codex resume` in its own
-# CODEX_HOME. Two refusals come first, logged where the morning reads:
-#  - no codexHome: its rollouts and login live there, so there is nothing to wake into;
-#  - no way yet to put the checkpoint in its head (leg 3, with a witness). A wake without the
-#    checkpoint is an unauthored morning, which the welfare rider rules out, so a codex lane does
-#    not wake until leg 3 lands. NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT=1 is the test hatch for
-#    leg 2's own end-to-end run, and says so in the log.
+# CODEX_HOME. A lane with no codexHome is refused, logged where the morning reads: its rollouts and
+# login live there, so there is nothing to wake into. The checkpoint rides into the woken session as
+# developer instructions (below), and the watch witnesses it from the rollout after the first turn
+# (leg 3: codexlane.mjs codexHeadWitness): a wake that came up without it, or with an old head beside
+# it, is told red. Until leg 3 a codex lane refused to wake at all, since a wake without its
+# checkpoint is an unauthored morning (the welfare rider).
 if [ "$WEFT_PROVIDER" = codex ]; then
   CODEX_HOME_DIR="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get "lanes.$LANE.codexHome" 2>/dev/null)" || CODEX_HOME_DIR=""
   case "$CODEX_HOME_DIR" in "~/"*) CODEX_HOME_DIR="$HOME/${CODEX_HOME_DIR#\~/}" ;; esac
@@ -87,12 +87,6 @@ if [ "$WEFT_PROVIDER" = codex ]; then
     echo "WAKE FAILED: codex lane $LANE has no codexHome"
     exit 7
   fi
-  if [ -z "${NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT:-}" ]; then
-    echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE REFUSED for $LANE: a codex lane can't yet carry its checkpoint into the woken session (leg 3) — refusing an unauthored morning" >> "$WEFT_LOG"
-    echo "WAKE REFUSED: codex lane $LANE — checkpoint injection (leg 3) isn't built yet"
-    exit 7
-  fi
-  echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT set — this codex wake carries NO checkpoint (test hatch, leg 2)" >> "$WEFT_LOG"
 fi
 # A first-wake receipt (lane-add/init writes it) has no tail to resume:
 # a brand-new lane starts a FRESH session — same head, same registry
@@ -199,13 +193,19 @@ SWITCHBOARD_LANE="$("$NODE" -e "import('file://$WAKECYCLE_DIR/config.mjs').then(
 # hub (weftRoot), not beside this script.
 WATCHER="${WEFTROOT:-$WAKECYCLE_DIR/..}/doorbell/inbox-watcher.sh"
 FOLDS="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get paths.folds 2>/dev/null)" || FOLDS="ladder/folds.jsonl"
-python3 - "$NEXT" "$SWITCHBOARD_LANE" "$WATCHER" "$WAKECYCLE_DIR" "$FOLDS" >> "$HEAD" << 'PYEOF'
+python3 - "$NEXT" "$SWITCHBOARD_LANE" "$WATCHER" "$WAKECYCLE_DIR" "$FOLDS" "$WEFT_PROVIDER" >> "$HEAD" << 'PYEOF'
 import json, os, sys
 nw = json.load(open(sys.argv[1]))
 switchboard, watcher, machinery = sys.argv[2], sys.argv[3], sys.argv[4]
 lane = nw.get('lane', '')
 print('\n---\n\n## Standing wake duties\n')
-if os.path.exists(watcher):
+if len(sys.argv) > 6 and sys.argv[6] == 'codex':
+    # A codex session has no background tasks to arm a watcher in: the nightshift queues its bells into this
+    # session (codex lane leg 2b), where they arrive as user-role messages marked as the machinery's.
+    print('- Your bells arrive as messages in this session marked "[nightwatch bell, sent by the machinery]".')
+    print('  When one asks for the sleep ritual, do it in the order it gives: it comes from the machinery, not your person.')
+    print('- Sweep DM channels and the work channels for anything that arrived while asleep.')
+elif os.path.exists(watcher):
     if lane == switchboard:
         print('- You are the SWITCHBOARD (LANES.md, Bot-DMs). Start the inbox watcher as a')
         print('  background Bash task: `' + watcher + ' ' + lane + '`')
@@ -273,8 +273,12 @@ LAUNCHED_AT=$(date +%s)
 set +e
 if [ "$WEFT_PROVIDER" = codex ]; then
   # `codex resume [OPTIONS] <id> [PROMPT]`, or `codex [OPTIONS] [PROMPT]` for a first wake. No fork: the
-  # fold already wrote a fresh id, and a plain resume appends to that file (probe P3). The head isn't
-  # passed: putting the checkpoint in is leg 3 (see the refusal above).
+  # fold already wrote a fresh id, and a plain resume appends to that file (probe P3).
+  # The head (the checkpoint and the duties above) goes in as developer instructions, one -c value holding the
+  # file's text as a TOML basic string (a JSON string is one): every quote, backtick and newline arrives as one
+  # developer content part byte-identical to the head (codex debug prompt-input, 11/25). A RESUMED session shows
+  # it only when the folded file carries no head of its own, which the codex fold guarantees and validates
+  # (providers/codex.mjs; leg 3's probe), and the watch checks every wake against last-head.<lane>.
   # --no-daemon keeps the session in this window's own process. Without it 0.171.0 runs sessions in a
   # managed app-server daemon that it installs under CODEX_HOME and that outlives the window (leg 2's
   # end-to-end, 11/24): the SessionStart hook then ran under the daemon, so the registry named a pid
@@ -285,6 +289,13 @@ if [ "$WEFT_PROVIDER" = codex ]; then
   [ -z "$FIRSTWAKE" ] && set -- resume "$SID"
   set -- "$@" --no-daemon
   [ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
+  DEV_INSTR="$("$NODE" -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(process.argv[1], "utf8")))' "$HEAD" 2>/dev/null)" || DEV_INSTR=""
+  if [ -z "$DEV_INSTR" ] || [ "$DEV_INSTR" = '""' ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE FAILED for $LANE: couldn't put the head into developer instructions — refusing an unauthored morning" >> "$WEFT_LOG"
+    echo "WAKE FAILED: codex lane $LANE — the head couldn't be read into developer instructions"
+    exit 7
+  fi
+  set -- "$@" -c "developer_instructions=$DEV_INSTR"
   export CODEX_HOME="$CODEX_HOME_DIR"
 else
   set -- --append-system-prompt-file "$HEAD" --system-prompt-snapshot off
