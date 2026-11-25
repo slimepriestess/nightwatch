@@ -100,3 +100,37 @@ export function queueBell({ codexBin, codexHome, sessionId, text, nodePath = pro
   const r = run(codexBin, ['queue', '--thread', sessionId, '--message', `${BELL_PREFIX} ${text}`], { env, encoding: 'utf8', timeout: 10_000 });   // inside the tick: a hung codex holds the night
   return { ok: r.status === 0, status: r.status ?? null, error: r.error?.message ?? null, stderr: String(r.stderr ?? '').trim().slice(-300) };
 }
+
+/**
+ * Leg 3's witness: did a codex wake's head carry its checkpoint, and is it the only head? Read from the woken rollout
+ * itself, after its first turn. wake.sh hands Codex the head as `-c developer_instructions=<the file's text>`, and
+ * Codex records it as one developer content part, byte for byte (codex debug prompt-input, 11/25). Presence alone is
+ * not enough: in leg 3's probe a rollout held the checkpoint beside a doubled head (an old one kept by the fold) and the
+ * model answered, twice, that it had none. So the witness asks two things:
+ *   - the saved head appears as an exact developer content part in the rows the wake appended (index >= appendedFrom,
+ *     the fold's kept count);
+ *   - the file holds exactly one head: one additional_tools item and one full world_state (counted in rows and inside
+ *     compacted replacement histories). On every good wake of the probe both were 1; on the doubled one, both 2.
+ * Returns { status: 'pending' | 'ok' | 'missing' | 'doubled', ... }; 'pending' until the appended rows hold a finished
+ * turn. 'doubled' outranks 'missing': a doubled head is the case where presence lies.
+ */
+export function codexHeadWitness({ rows, appendedFrom, head }) {
+  const appended = rows.slice(appendedFrom);
+  const done = appended.some((r) => r?.type === 'event_msg' && r.payload?.type === 'task_complete');
+  if (!done) return { status: 'pending' };
+  const devParts = (it) => (it?.type === 'message' && it.role === 'developer' && Array.isArray(it.content)
+    ? it.content.map((c) => c?.text).filter((t) => typeof t === 'string') : []);
+  const seen = appended.filter((r) => r?.type === 'response_item').flatMap((r) => devParts(r.payload)).filter((t) => t === head).length;
+  let tools = 0;
+  let fullStates = 0;
+  for (const r of rows) {
+    if (r?.type === 'world_state' && r.payload?.full === true) fullStates++;
+    const items = r?.type === 'response_item' ? [r.payload]
+      : r?.type === 'compacted' && Array.isArray(r.payload?.replacement_history) ? r.payload.replacement_history : [];
+    for (const it of items) if (it?.type === 'additional_tools') tools++;
+  }
+  const facts = { seen, tools, fullStates };
+  if (tools > 1 || fullStates > 1) return { status: 'doubled', ...facts };
+  if (seen === 0) return { status: 'missing', ...facts };
+  return { status: 'ok', ...facts };
+}
