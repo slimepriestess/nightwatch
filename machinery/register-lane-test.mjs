@@ -95,6 +95,52 @@ try {
     });
   }
 
+  // A codex lane (leg 2) runs this same hook from Codex's SessionStart. Its parent is the native
+  // codex binary (probe Q2), so the walk looks for codex, never a claude above it; and a codex
+  // session has no background tasks, so it gets no watcher line (its bells are `codex queue`).
+  {
+    const hook = join(HERE, 'register-lane.sh');
+    const e = { ...process.env, NIGHTWATCH_CONFIG: cfgCodex, NIGHTWATCH_LANE: 'alpha' };
+    for (const k of ['WEFT_CONFIG', 'WEFT_LANE']) delete e[k];
+    const input = join(hub, 'codex-hook-input.json'); writeFileSync(input, JSON.stringify({ session_id: 'sid-codex-chain' }));
+    const outFile = join(hub, 'codex-hook-out.txt');
+    // A stand-in codex (node with argv0 "codex") under a stand-in claude: the entry must name the codex.
+    const inner = `const { execFileSync } = require('node:child_process');
+      execFileSync('sh', ['-c', 'sh "$0" < "$1" > "$2"; true', ${JSON.stringify(hook)}, process.argv[1], process.argv[2]], { stdio: 'ignore' });
+      process.stdout.write(String(process.pid));`;
+    const outer = `const { spawnSync } = require('node:child_process');
+      const r = spawnSync(process.execPath, ['-e', ${JSON.stringify(inner)}, process.argv[1], process.argv[2]], { argv0: 'codex', encoding: 'utf8' });
+      process.stdout.write(r.stdout);`;
+    const r = spawnSync(process.execPath, ['-e', outer, input, outFile], { argv0: 'claude', env: e, encoding: 'utf8' });
+    check('a codex lane records the codex above the hook, not a claude further up (leg 2)', () => {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(entry('sid-codex-chain').pid, Number(r.stdout));
+      assert.equal(entry('sid-codex-chain').provider, 'codex');
+    });
+    check('a codex lane gets no bell-watcher line (its bells are codex queue messages)', () => {
+      assert.doesNotMatch(readFileSync(outFile, 'utf8'), /bell-watcher/);
+    });
+  }
+
+  // An app-server daemon between the hook and the session is passed over: it outlives the session
+  // (leg 2's end-to-end). A stand-in daemon is node with argv0 "codex" and an app-server argument.
+  {
+    const hook = join(HERE, 'register-lane.sh');
+    const e = { ...process.env, NIGHTWATCH_CONFIG: cfgCodex, NIGHTWATCH_LANE: 'alpha' };
+    for (const k of ['WEFT_CONFIG', 'WEFT_LANE']) delete e[k];
+    const input = join(hub, 'codex-daemon-input.json'); writeFileSync(input, JSON.stringify({ session_id: 'sid-codex-daemon' }));
+    const daemon = `const { execFileSync } = require('node:child_process');
+      execFileSync('sh', ['-c', 'sh "$0" < "$1"; true', ${JSON.stringify(hook)}, process.argv[1]], { stdio: 'ignore' });`;
+    const session = `const { spawnSync } = require('node:child_process');
+      spawnSync(process.execPath, ['-e', ${JSON.stringify(daemon)}, process.argv[1], 'app-server', '--managed-daemon'], { argv0: 'codex', stdio: 'ignore' });
+      process.stdout.write(String(process.pid));`;
+    const r = spawnSync(process.execPath, ['-e', session, input], { argv0: 'codex', env: e, encoding: 'utf8' });
+    check('a codex app-server daemon above the hook is passed over for the session above it (leg 2 e2e)', () => {
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(entry('sid-codex-daemon').pid, Number(r.stdout));
+    });
+  }
+
   // #69: the week-old prune runs on every SessionStart, so it must not take
   // the entry of a session that is still running (a midday-only lane can live
   // longer than a week between folds). A stand-in for that session's claude:
@@ -103,6 +149,8 @@ try {
   // Some other program now at a recorded pid: a plain sleep, whose command
   // line names no claude wherever the checkout sits.
   const other = spawn('sleep', ['60'], { stdio: 'ignore' });
+  // A live codex lane's session: its entry must survive the prune too.
+  const liveCodex = spawn('sleep', ['60'], { argv0: 'codex', stdio: 'ignore' });
   try {
     const old = (sid, pid) => {
       const f = join(hub, 'wakecycle', `lane.${sid}`);
@@ -112,12 +160,15 @@ try {
     old('sid-live', live.pid);
     old('sid-dead', 999999);
     old('sid-notclaude', other.pid);
+    old('sid-live-codex', liveCodex.pid);
     run({ NIGHTWATCH_CONFIG: cfg }, 'sid-plain'); // an unlaned session opened in the hub runs the prune
     check('a week-old entry whose claude is still running is kept (#69)', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-live'))));
     check('a week-old entry whose process is gone is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-dead'))));
     check('a week-old entry whose pid is now some other program is pruned', () => assert.ok(!existsSync(join(hub, 'wakecycle', 'lane.sid-notclaude'))));
     check('a fresh entry is kept', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-new'))));
+    check('a week-old entry whose codex is still running is kept (leg 2)', () => assert.ok(existsSync(join(hub, 'wakecycle', 'lane.sid-live-codex'))));
   } finally {
+    liveCodex.kill();
     live.kill();
     other.kill();
   }
