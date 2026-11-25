@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 
 import { providerOf, configEnv, contextOfEntries, loadConfig, reloadConfig, switchboardLane } from './config.mjs';
 import { cannotAnswer, liveTranscriptPath } from './deadwake.mjs';
+import { codexBinFor, codexLiveSessions, codexQuietMs, queueBell } from './codexlane.mjs';
 import { claudeVersionLines, flagLines, nodeLines, nodeRealIo, realIo as claudeVersionIo, wakePromptLines } from './versioncheck.mjs';
 
 const HOME = homedir();
@@ -247,7 +248,28 @@ function liveSessions() {
       out.push({ pid, sessionId });
     } catch { /* gone, or not ours */ }
   }
+  // A codex lane's session (codex lane plan, leg 2b) has neither a bridge socket nor a Claude Code status file: the
+  // registry names it, and codexlane.mjs counts it only while its pid is a running codex session.
+  for (const s of codexLiveSessions(WAKECYCLE)) {
+    if (seenPids.has(s.pid)) continue;
+    seenPids.add(s.pid);
+    out.push(s);
+  }
   return out;
+}
+// A codex session's lane, from the registry's own row ({lane, provider}): {lane, home} (home null when the lane
+// names no codexHome), or null for a Claude Code session or one the hub never registered.
+function codexOf(sessionId) {
+  try {
+    const e = JSON.parse(readFileSync(join(WAKECYCLE, `lane.${sessionId}`), 'utf8'));
+    return e.provider === 'codex' ? { lane: e.lane, home: CFG.lanes?.[e.lane]?.codexHome ?? null } : null;
+  } catch { return null; }
+}
+// Whether a session can take a prompt at all: Claude Code's "Prompt is too long" tail. A codex session has no such
+// transcript; its rollout isn't read here, so it never counts as dead (its quiet and the orphan floor still apply).
+function sessionCannotAnswer(sessionId) {
+  if (codexOf(sessionId)) return false;
+  return cannotAnswer(liveTranscriptPath(sessionId, PROJECT_DIR));
 }
 // Lane attribution with its GRADE, because not every answer is evidence
 // (Ra's 10/13 find): 'registry' is ground truth (wake.sh exports NIGHTWATCH_LANE,
@@ -335,6 +357,7 @@ function laneSessionsRanked(sessions, attribution, lane) {
 // and reads quiet (and stale) while the conversation goes on in the new one
 // (nightwatch#24; liveTranscriptPath in deadwake.mjs, the fold's own rules).
 function contextNow(sessionId, lane) {
+  if (codexOf(sessionId)) return null;   // a codex rollout's usage is leg 4's (usage-tee); unknown, so no full-window rule
   try {
     const lines = readFileSync(liveTranscriptPath(sessionId, PROJECT_DIR), 'utf8').split('\n').filter((l) => l.trim()).slice(-400);
     const entries = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
@@ -342,6 +365,11 @@ function contextNow(sessionId, lane) {
   } catch { return null; }
 }
 function transcriptQuietMs(sessionId) {
+  // A codex session is quiet by its rollout's mtime. With no rollout found, or no codexHome to look in, it is unknown,
+  // and unknown is NOT quiet (0): Claude Code's missing file reads Infinity, which for a codex session would close it
+  // or orphan-fold it at once while it worked.
+  const cx = codexOf(sessionId);
+  if (cx) return cx.home ? codexQuietMs(cx.home, sessionId) ?? 0 : 0;
   try { return Date.now() - statSync(liveTranscriptPath(sessionId, PROJECT_DIR)).mtimeMs; } catch { return Infinity; }
 }
 
@@ -400,6 +428,7 @@ function ringBell(lane, sessionId, source, midday) {
   // between a lane and Nightwatch. A lane with no watcher armed still has
   // the orphan fold as its floor.
   const ritual = midday ? middayNote(lane, sessionId, midday) : ritualNote(lane, sessionId);
+  if (providerOf(CFG.lanes, lane) === 'codex') return ringCodexBell(lane, sessionId, ritual, source, midday);
   try {
     const spool = join(CFG.paths.spool, lane);
     mkdirSync(spool, { recursive: true });
@@ -423,6 +452,33 @@ function ringBell(lane, sessionId, source, midday) {
   } catch (e) {
     log(`bell spool write FAILED for ${lane}: ${e.message}`);
     emitEvent('bell-failed', { lane, error: e.message, alarm: true });
+  }
+}
+
+// A codex lane's bell (leg 2b): queued to its live session's thread, which hears it at its next idle point (probe Q1:
+// an idle interactive session answered a queued message by itself in about 12 s). Never to a session that isn't
+// running (Ra, 11/23): checked here, at the queue, whatever the caller saw. A lane that hears nothing still has the
+// orphan floor, as a Claude Code lane with no watcher armed does.
+function ringCodexBell(lane, sessionId, ritual, source, midday) {
+  const sid8 = sessionId.slice(0, 8);
+  if (!codexLiveSessions(WAKECYCLE).some((s) => s.sessionId === sessionId)) {
+    log(`no bell for ${lane}: codex session ${sid8}… isn't running — a queued message would wait for a later session; the orphan floor holds`);
+    emitEvent('bell-unheard', { lane, session: sessionId, reason: 'not-live' });
+    return;
+  }
+  const home = CFG.lanes?.[lane]?.codexHome;
+  if (!home) {
+    log(`bell FAILED for ${lane}: a codex lane with no codexHome in the config — nowhere to queue it`);
+    emitEvent('bell-failed', { lane, error: 'no codexHome', alarm: true });
+    return;
+  }
+  const r = queueBell({ codexBin: codexBinFor(CFG.paths?.codexBin), codexHome: home, sessionId, text: ritual });
+  if (r.ok) {
+    log(`rang the sleep-bell for ${lane} (codex session ${sid8}…) — queued to its thread`);
+    emitEvent('bell-rung', { lane, session: sessionId, ...(source ? { source } : {}), ...(midday ? { midday: midday.tier } : {}) });
+  } else {
+    log(`bell queue FAILED for ${lane} (codex session ${sid8}…): exit ${r.status}${r.error ? ` (${r.error})` : ''}${r.stderr ? `; ${r.stderr}` : ''}`);
+    emitEvent('bell-failed', { lane, error: r.error ?? `codex queue exit ${r.status}`, alarm: true });
   }
 }
 
@@ -484,8 +540,9 @@ const io = {
     return existsSync(nw) ? statSync(nw).mtimeMs : 0;
   },
   closePid: (pid) => process.kill(pid, 'SIGTERM'),
-  cannotAnswer: (sessionId) => cannotAnswer(liveTranscriptPath(sessionId, PROJECT_DIR)),
+  cannotAnswer: (sessionId) => sessionCannotAnswer(sessionId),
   lastEntryIsApiError: (sessionId) => {
+    if (codexOf(sessionId)) return false;   // a Claude Code transcript's marker; a codex rollout has none
     try {
       const lines = readFileSync(liveTranscriptPath(sessionId, PROJECT_DIR), 'utf8')
         .split('\n').filter((l) => l.trim());
@@ -1811,7 +1868,7 @@ if (process.argv.includes('--fold-now')) {
   LIVE_EMIT = true;
   // A dead wake can't hear a bell; waiting out the deadline only delays the
   // fold (10/8: ten minutes of nothing, then the forced fold). Force now.
-  const dead = cannotAnswer(liveTranscriptPath(live[0].sessionId, PROJECT_DIR));
+  const dead = sessionCannotAnswer(live[0].sessionId);
   const now_ = dead || withinMin === 0;
   if (dead) {
     log(`DEAD WAKE: ${lane} session ${live[0].sessionId.slice(0, 8)}… can't take a prompt — fold-now skips the bell and forces at once`);
@@ -1897,7 +1954,7 @@ if (process.argv.includes('--midday')) {
   const urgentMin = mc.urgentMin ?? 10;
   LIVE_EMIT = true;
   const sid = live[0].sessionId;
-  const dead = cannotAnswer(liveTranscriptPath(sid, PROJECT_DIR));
+  const dead = sessionCannotAnswer(sid);
   if (dead) {
     log(`DEAD WAKE: ${lane} session ${sid.slice(0, 8)}… can't take a prompt — the midday ${tier} bell forces at once`);
     emitEvent('dead-wake', { lane, session: sid, alarm: true });
@@ -1958,7 +2015,7 @@ if (process.argv.includes('--ring')) {
     console.error(`--ring: agent ${lane} is not awake — nothing to bell`);
     process.exit(3);
   }
-  if (cannotAnswer(liveTranscriptPath(live[0].sessionId, PROJECT_DIR))) {
+  if (sessionCannotAnswer(live[0].sessionId)) {
     console.error(`--ring: ${lane}'s session can't take a prompt ("Prompt is too long"), so a bell can't reach it. Use Fold now: it folds from the last session that ran and opens a fresh window.`);
     process.exit(4);
   }
