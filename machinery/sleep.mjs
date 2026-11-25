@@ -16,7 +16,6 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync, copyFileSync, statSync, readdirSync } from 'node:fs';
 import { rungHealth } from './rung-health.mjs';
 import { execFileSync } from 'node:child_process';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadConfig, laneConfig } from './config.mjs';
@@ -24,6 +23,7 @@ import { resolveFoldSource, followContinued } from './deadwake.mjs';
 import { archiveTranscript, archiveRollout, catchUpArchive } from './archive.mjs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { findRollout } from './codexlane.mjs';
 // Code finds code beside ITSELF (the machinery dir), never in the hub's
 // state dir — the pointer-model split (rehearsal finding 5, 10/7).
 const MACHINERY_DIR = dirname(fileURLToPath(import.meta.url));
@@ -67,22 +67,8 @@ if (CODEX && !laneCfg.codexHome) {
   console.error(`sleep.mjs: lane ${lane} is a codex lane with no codexHome in the config — refusing (its rollouts live there).`);
   process.exit(2);
 }
-// The rollout for a session id under <codexHome>/sessions, newest name first; a compressed one (.jsonl.zst) is
-// returned as found, and trim refuses it by name.
-function findRollout(sid) {
-  const root = join(laneCfg.codexHome.replace(/^~(?=\/)/, homedir()), 'sessions');
-  const hits = [];
-  const walk = (d, depth) => {
-    let es = [];
-    try { es = readdirSync(d, { withFileTypes: true }); } catch { return; }
-    for (const e of es) {
-      if (e.isDirectory() && depth < 3) walk(join(d, e.name), depth + 1);
-      else if (e.isFile() && e.name.startsWith('rollout-') && (e.name.endsWith(`-${sid}.jsonl`) || e.name.endsWith(`-${sid}.jsonl.zst`))) hits.push(join(d, e.name));
-    }
-  };
-  walk(root, 0);
-  return hits.sort().pop() ?? null;
-}
+// The rollout for a session id under <codexHome>/sessions (codexlane.mjs findRollout: one walk for the fold and the
+// nightshift's quiet); a compressed one (.jsonl.zst) is returned as found, and trim refuses it by name.
 const laneTarget = args.includes('--emergency') && laneCfg.emergencyTargetTokens
   ? laneCfg.emergencyTargetTokens : laneCfg.targetTokens;
 const target = Number(flag('--target-tokens', String(laneTarget)));
@@ -283,7 +269,7 @@ if (deadWake.skipped.length) {
 // the wrong story: nothing happened, so nothing is lost. Write a fresh-start
 // receipt (wake.sh's firstWake mode) and no fold row — a fold that didn't
 // happen never gets a row (the house doesn't fake receipts).
-const SRC = CODEX ? findRollout(sessionId) : join(CFG.paths.transcripts, `${sessionId}.jsonl`);
+const SRC = CODEX ? findRollout(laneCfg.codexHome, sessionId) : join(CFG.paths.transcripts, `${sessionId}.jsonl`);
 if (!SRC || !existsSync(SRC)) {
   const registered = existsSync(join(WEFT, 'wakecycle', `lane.${sessionId}`));
   if (registered) {

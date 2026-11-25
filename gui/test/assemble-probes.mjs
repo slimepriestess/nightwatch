@@ -365,6 +365,18 @@ const usageLine = (id, agoMs, ctxTokens, outTokens) => JSON.stringify({
   check('log: an unwatched bell shows as a bell, amber, saying why', rows.some((r) => r[2] === 'bell' && r[3] === 'warn' && /no tracked watcher/.test(r[4])), JSON.stringify(rows));
 }
 
+// ---- probe: a codex lane's bell not sent (its session isn't running), and a codex session whose quiet can't be read
+// (leg 2b, Sonnet's #89 read: both were invisible in the viewer, which skips a kind it can't map).
+{
+  const LC = { ...cfg, lanes: { lark: { provider: 'codex' } } };
+  const ev = [{ at: iso(1800e3), kind: 'bell-unheard', lane: 'lark', provider: 'codex', reason: 'not-live' },
+    { at: iso(1200e3), kind: 'quiet-unknown', lane: 'lark', provider: 'codex', alarm: true }];
+  const s = assemble(LC, { readText: (p) => p === '/ev' ? ev.map((e) => JSON.stringify(e)).join('\n') : null, readDir: () => [], readTail: () => null, stat: () => null, livePids: () => [], psCommand: () => null, now: () => NOW }, '8h');
+  const rows = s.LOG.flatMap(([, r]) => r).filter((r) => r[1] === 'lark');
+  check('log: a codex bell not sent shows as a bell, amber, saying why', rows.some((r) => r[2] === 'bell' && r[3] === 'warn' && /isn't running/.test(r[4])), JSON.stringify(rows));
+  check('log: a codex session whose quiet can\'t be read shows red, saying what to do', rows.some((r) => r[3] === 'failed' && /fold it by hand/.test(r[4])), JSON.stringify(rows));
+}
+
 // ---- the fold-cycle stage on a live lane (opus, 10/9). The card's state
 // comes from lifecycle events only; a fold leaves 'folding' until the close.
 {
