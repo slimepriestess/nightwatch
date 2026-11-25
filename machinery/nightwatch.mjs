@@ -33,6 +33,7 @@ import { daemonJob, registryFile, summonArgvFor, withToolPath } from './platform
 import { DEFAULT_WAKE_PROMPT, wakePromptProblem } from './versioncheck.mjs';
 import { configEnv, machineZone } from './config.mjs';
 import { applyRetention, stepFor, survey } from './retention.mjs';
+import { appServerRpc, codexBinFor, laneHooksJson, trustLaneHook } from './codexlane.mjs';
 
 const WC = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
@@ -101,6 +102,13 @@ function loadSpec(path) {
   }
   const fs = lane.firstSession ?? { kind: 'fresh' };
   if (fs.kind !== 'fresh' && fs.kind !== 'adopt') die('firstSession.kind must be "fresh" or "adopt".');
+  // A codex lane (codex lane leg 6): the runtime is the person's choice; its CODEX_HOME is its own.
+  if (lane.provider !== undefined && lane.provider !== 'claude-code' && lane.provider !== 'codex') die('lane.provider must be "claude-code" or "codex".');
+  if (lane.provider === 'codex') {
+    if (spec.op !== 'lane-add') die('A codex agent is added to a hub that exists (Add agent), not created with it.');
+    if (fs.kind === 'adopt') die('Adopting a running session is for Claude Code agents; a codex agent starts fresh.');
+    if (lane.codexHome !== undefined && (typeof lane.codexHome !== 'string' || !lane.codexHome.trim())) die('lane.codexHome must be a folder path.');
+  }
   if (fs.kind === 'adopt' && !fs.sessionId) die('Adopting a session needs its sessionId.');
   if (spec.op === 'init') {
     if (!spec.hub) die('init needs a hub folder path.');
@@ -354,6 +362,9 @@ function laneAddSteps(spec) {
   const noActivate = !!process.env.WEFT_NW_NO_ACTIVATE;
   const cpPath = expand(cfg.paths?.checkpoint ?? join(hub, 'checkpoint.md'));
   const steps = [];
+  // A codex agent gets its own CODEX_HOME (its rollouts, its login, its hook), named in the config as given.
+  const codex = lane.provider === 'codex' ? { homeAsGiven: lane.codexHome ?? join(hub, 'codex', lane.id) } : null;
+  if (codex) codex.home = expand(codex.homeAsGiven);
   // Order (opus's read, 6a): the first-session artifact is written first
   // (inert without a config entry), the checkpoint section second
   // (idempotent: skipped when present, so a retry never duplicates it),
@@ -362,7 +373,7 @@ function laneAddSteps(spec) {
   const claimStep = {
     verb: 'Add', what: `agent "${lane.id}" to ${ctx.name ?? 'the persona'}`, detail: `${lane.model}, ${spec.lane.schedule ? 'their own schedule' : 'the global schedule'}, ${Math.round(target / 1000)}k${lane.armed === false ? ', not armed' : ''}, ${lane.wakePrompt === null ? 'no wake prompt' : lane.wakePrompt ? 'their own wake prompt' : 'the default wake prompt'}`,
     run() {
-      cfg.lanes[lane.id] = { targetTokens: target, model: lane.model, ...wakePromptField(lane), ...(spec.lane.schedule ? { schedule: spec.lane.schedule } : {}) };
+      cfg.lanes[lane.id] = { targetTokens: target, model: lane.model, ...(codex ? { provider: 'codex', codexHome: codex.homeAsGiven } : {}), ...wakePromptField(lane), ...(spec.lane.schedule ? { schedule: spec.lane.schedule } : {}) };
       writeFileSync(cfgPath + '.tmp', JSON.stringify(cfg, null, 2) + '\n');
       renameSync(cfgPath + '.tmp', cfgPath);
       if (lane.armed !== false) {
@@ -390,10 +401,39 @@ function laneAddSteps(spec) {
   // claim) → launch. A failure before the claim leaves nothing a retry
   // trips on; after it, the receipt exists and Wake retries the launch.
   steps.push(cpStep);
+  if (codex) steps.push(...codexHomeSteps(codex.home, cfg, noActivate));
   if (fs.prep) steps.push(fs.prep);
   steps.push(claimStep);
   if (fs.launch) steps.push(fs.launch);
   return { steps, hub, ctx };
+}
+
+// Leg 6: a codex agent's home, before the claim (inert without a config entry). The hook registers each session the
+// way register-lane.sh does for Claude Code (leg 2); Codex skips an untrusted hook silently, so trust is part of the
+// build, written the way Codex's own UI writes it (codexlane.mjs trustLaneHook). The login is never ours: the person
+// signs this home in themselves, and the first wake's window asks them to.
+function codexHomeSteps(home, cfg, noActivate) {
+  const machinery = expand(cfg.paths?.machinery ?? WC);
+  const hooks = laneHooksJson(machinery);
+  return [
+    {
+      verb: 'Make', what: `the agent's own Codex home`, detail: `${home}: their sessions, their login and the hook that registers each session (register-lane.sh)`,
+      run() {
+        const file = join(home, 'hooks.json');
+        if (existsSync(file) && readFileSync(file, 'utf8') !== hooks) throw new Error(`${file} is already there with other hooks; nothing was changed`);
+        mkdirSync(home, { recursive: true, mode: 0o700 });
+        writeFileSync(file, hooks);
+      },
+    },
+    {
+      verb: 'Trust', what: 'that hook in Codex', detail: "as Codex's own settings would (an untrusted hook never runs); no model is called and nothing is signed in",
+      async run() {
+        if (noActivate) return;
+        const codexBin = codexBinFor(cfg.paths?.codexBin, process.execPath);
+        await trustLaneHook({ codexHome: home, rpc: (calls) => appServerRpc({ codexBin, codexHome: home, cwd: home, calls }) });
+      },
+    },
+  ];
 }
 
 function firstSessionStep(spec, hub, ctx, noActivate, cpPath, laneWc) {
@@ -428,7 +468,8 @@ function firstSessionStep(spec, hub, ctx, noActivate, cpPath, laneWc) {
     },
   };
   const launch = {
-    verb: 'Open', what: `a Terminal window running Claude Code (${spec.lane.model})`, detail: 'a fresh session: their first wake',
+    verb: 'Open', what: `a Terminal window running ${spec.lane.provider === 'codex' ? 'Codex' : 'Claude Code'} (${spec.lane.model})`,
+    detail: spec.lane.provider === 'codex' ? "a fresh session: their first wake. Codex asks you to sign this agent in there (the login is yours) and whether to trust its folder" : 'a fresh session: their first wake',
     run() {
       if (noActivate) return;
       // Quoted for paths with spaces (opus's read, 6d); platform.mjs owns
@@ -800,7 +841,7 @@ try {
       out({ steps: steps.map(({ verb, what, detail, consent }) => ({ verb, what, detail, ...(consent ? { consent } : {}) })) });
     } else {
       for (const step of steps) {
-        try { step.run(); }
+        try { await step.run(); }
         catch (e) {
           if (spec.op === 'init') rmSync(expand(spec.hub) + '.partial', { recursive: true, force: true });
           die(`The "${step.verb} ${step.what}" step failed: ${e.message}`);

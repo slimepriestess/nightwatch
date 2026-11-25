@@ -294,13 +294,16 @@ function usage_in(ms) {
 }
 function persona_usage(u, nowIso, tz) {
   if (!u || !Array.isArray(u.windows) || u.windows.length === 0) return '';
+  // A second plan (a codex lane's, leg 4) names itself in every long label, so two "5h" bars can't be confused.
+  const plan = u.provider === 'openai' ? 'Codex ' : '';
   const multi = u.windows.length > 1;
   const stale = u.stale
     ? (u.at ? ` Last read ${hmLocal(u.at, tz)}, ${elapsed(u.at, nowIso)} ago:` : ' Never read:') + ' Nightwatch hears the plan only while a session is running, so it may have moved since.'
     : '';
   const wins = u.windows.map((w, i) => {
     const nice = w.key.replace(/_/g, ' '), named = nice.charAt(0).toUpperCase() + nice.slice(1);
-    const [short, long] = USAGE_NAMES[w.key] ?? [named, named];
+    const [short, long0] = USAGE_NAMES[w.key] ?? [named, named];
+    const long = plan + long0;
     const left = w.resetsAt ? usage_in(Date.parse(w.resetsAt) - Date.parse(nowIso)) : '';
     const pct = typeof w.pct === 'number' ? w.pct : null;
     const blank = w.expired || pct === null;
@@ -353,7 +356,7 @@ function persona_groups(ctx) {
       `<h2 data-part="persona-name" data-action="toggle-persona-card" aria-expanded="true">` +
       `<span data-part="persona-avatar" aria-hidden="true">${esc(p.name.charAt(0).toUpperCase())}</span>` +
       `<span data-part="label">${nm}</span><span data-part="persona-toggle" aria-hidden="true">${icon('chev')}</span></h2>` +
-      `<div data-part="persona-body"><ul data-part="persona-agents" aria-label="${nm}'s agents">${dots}</ul>${persona_usage(p.usage, ctx.NOW, ctx.TZ)}` +
+      `<div data-part="persona-body"><ul data-part="persona-agents" aria-label="${nm}'s agents">${dots}</ul>${persona_usage(p.usage, ctx.NOW, ctx.TZ)}${persona_usage(p.usageCodex, ctx.NOW, ctx.TZ)}` +
       `<div data-part="persona-buttons"><button type="button" data-action="toggle-persona" data-part="show-agents" aria-pressed="true" aria-label="Hide agents" data-tip="Show or hide ${nm}'s agent cards">${icon('eye')}${icon('eye-off')}</button>` +
       `<button type="button" data-action="persona-settings" aria-label="Persona settings" data-tip="${nm}'s settings">${icon('gear')}</button></div></div></article>` +
       lanes.map((L) => lane_card(L, ctx.NOW, ctx.TZ)).join('') + add_slot(false, ctx.SCHEDULE, 'form', [], p.id) + '</section>';

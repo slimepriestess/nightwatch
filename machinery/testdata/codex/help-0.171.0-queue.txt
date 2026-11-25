@@ -1,0 +1,47 @@
+Queue a message for an existing session
+
+Usage: codex queue [OPTIONS] --thread <THREAD> --message <TEXT>
+
+Options:
+      --thread <THREAD>
+          Session UUID or exact session name
+
+      --enable <FEATURE>
+          Enable a feature (repeatable). Equivalent to `-c features.<name>=true`
+
+      --message <TEXT>
+          Message text to queue
+
+      --disable <FEATURE>
+          Disable a feature (repeatable). Equivalent to `-c features.<name>=false`
+
+      --resume
+          After queueing, try to resume the thread on the local daemon or selected --remote server.
+          A failed resume produces a warning and the command still succeeds
+
+      --remote <ADDR>
+          Connect the TUI to a remote app server endpoint.
+          
+          Accepted forms: `ws://host:port`, `wss://host:port`, `unix://`, or `unix://PATH`.
+
+      --remote-auth-token-env <ENV_VAR>
+          Name of the environment variable containing the bearer token to send to a remote app
+          server websocket
+
+  -p, --profile <CONFIG_PROFILE_V2>
+          Layer $CODEX_HOME/<name>.config.toml on top of the base user config
+
+      --strict-config
+          Error out when config.toml contains fields that are not recognized by this version of
+          Codex
+
+  -c, --config <key=value>
+          Override a startup configuration value (key=value). Queued messages use the thread's
+          model.
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Local server options (without --remote):
+  -C, --cd <DIR>
+          Tell the agent to use the specified directory as its working root

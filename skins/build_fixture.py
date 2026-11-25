@@ -318,6 +318,7 @@ def persona_usage(u, now_iso):
     if not u or not isinstance(u.get("windows"), list) or not u["windows"]:
         return ""
     wins_in = u["windows"]
+    plan = "Codex " if u.get("provider") == "openai" else ""
     multi = len(wins_in) > 1
     stale = ""
     if u.get("stale"):
@@ -327,7 +328,8 @@ def persona_usage(u, now_iso):
     out = ""
     for i, w in enumerate(wins_in):
         nice = w["key"].replace("_", " "); named = nice[:1].upper() + nice[1:]
-        short, long = USAGE_NAMES.get(w["key"], (named, named))
+        short, long0 = USAGE_NAMES.get(w["key"], (named, named))
+        long = plan + long0
         pct = w.get("pct") if isnum(w.get("pct")) else None
         blank = bool(w.get("expired")) or pct is None
         level = "none" if blank else "over" if pct >= 100 else "high" if pct >= 80 else "ok"
@@ -382,7 +384,7 @@ def persona_groups():
                 f'<h2 data-part="persona-name" data-action="toggle-persona-card" aria-expanded="true">'
                 f'<span data-part="persona-avatar" aria-hidden="true">{esc(p["name"][:1].upper())}</span>'
                 f'<span data-part="label">{nm}</span><span data-part="persona-toggle" aria-hidden="true">{icon("chev")}</span></h2>'
-                f'<div data-part="persona-body"><ul data-part="persona-agents" aria-label="{nm}\'s agents">{dots}</ul>{persona_usage(p.get("usage"), NOW)}'
+                f'<div data-part="persona-body"><ul data-part="persona-agents" aria-label="{nm}\'s agents">{dots}</ul>{persona_usage(p.get("usage"), NOW)}{persona_usage(p.get("usageCodex"), NOW)}'
                 f'<div data-part="persona-buttons"><button type="button" data-action="toggle-persona" data-part="show-agents" aria-pressed="true" aria-label="Hide agents" data-tip="Show or hide {nm}\'s agent cards">{icon("eye")}{icon("eye-off")}</button>'
                 f'<button type="button" data-action="persona-settings" aria-label="Persona settings" data-tip="{nm}\'s settings">{icon("gear")}</button></div></div></article>'
                 + "".join(lane_card(L, NOW) for L in lanes) + add_slot(persona=p["id"]) + '</section>')

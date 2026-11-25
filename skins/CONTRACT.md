@@ -483,3 +483,10 @@ Written by: claude-opus-5-5, 2026-10-05 (v0.1–v0.4)
   meter colour along its arc, keeps the skin's track bevel, and glows in Glass and Amber, as their lane meters do.
   Glass, Amber, Metal, Brassworks and Concrete take it through build_skins.py. Moonlamp hides persona cards, so it
   shows no usage.
+
+- **A second plan (codex lane leg 4, 11/25).** When the hub runs a codex lane, `persona.usageCodex` carries OpenAI's
+  windows (the watch writes them to `paths.usageCodex` from the lane's rollout, in the same schema). It renders as a
+  second `div[data-part="usage"][data-provider="openai"]` right after the first, built by the same rules; every long
+  label reads "Codex …" ("Codex 5-hour"), so the tips and meter names tell the two plans apart. Skins stack the two
+  blocks (minimal: the free height below the last one only) and give the `openai` block `--meter: var(--nw-ink)`,
+  not a state colour.

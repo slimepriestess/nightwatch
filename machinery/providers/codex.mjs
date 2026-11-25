@@ -39,6 +39,63 @@ import { estLine } from '../trim-core.mjs';
 
 export const name = 'codex';
 
+/**
+ * Who this adapter speaks for, with the receipt behind each claim (anima_dev/nightwatch_providers_design.md §4; codex
+ * lane leg 5). Pure: all I/O is injected, and WITHOUT io the identity is still whole, with version null and
+ * versionSource null, never a guess.
+ *
+ * io: { rolloutVersion } — session_meta.cli_version off the session's own rollout (the strongest source: it names
+ *     what actually ran); or { codexBin, nodePath, isExecutable(path), lookupPath(name), runVersion(path) } to
+ *     resolve the binary the way the machinery runs it (codexlane.mjs codexBinFor: paths.codexBin, else the codex
+ *     beside the daemon's node, else PATH's) and ask it.
+ *
+ * launchSurface lists exactly what wake.sh and the bells stand on, each with the help page that must define it; every
+ * `defined` claim is checked against the REAL `codex --help` fixtures under machinery/testdata/codex by
+ * providers-identify-test.mjs (the #44 lesson). witness: the woken rollout's own developer part, one head
+ * (codexlane.mjs codexHeadWitness, leg 3).
+ */
+export function parseVersion(text) {
+  const m = /codex-cli (\d+\.\d+\.\d+(?:[-+][\w.]+)?)/.exec(String(text ?? ''));
+  return m ? m[1] : null;
+}
+export function identify(io = {}) {
+  let bin = io.codexBin ?? null;
+  let via = io.codexBin ? 'paths.codexBin' : null;
+  if (io.isExecutable && io.lookupPath) {
+    const beside = io.nodePath ? join(dirname(io.nodePath), 'codex') : null;
+    if (io.codexBin && io.isExecutable(io.codexBin)) { bin = io.codexBin; via = 'paths.codexBin'; }
+    else if (beside && io.isExecutable(beside)) { bin = beside; via = 'beside node'; }
+    else { bin = io.lookupPath('codex') ?? null; via = bin ? 'PATH' : null; }
+  }
+  let version = null;
+  let versionSource = null;
+  if (typeof io.rolloutVersion === 'string' && io.rolloutVersion) {
+    version = io.rolloutVersion;
+    versionSource = 'rollout';
+  } else if (io.runVersion && bin) {
+    version = parseVersion(io.runVersion(bin));
+    versionSource = version ? '--version' : null;
+  }
+  return {
+    provider: name,
+    bin,
+    via,
+    lookupLabel: 'Codex CLI',
+    version,
+    versionSource,
+    launchSurface: [
+      { name: 'resume', kind: 'subcommand', page: '', defined: true }, // wake.sh: codex resume <tail>
+      { name: 'queue', kind: 'subcommand', page: '', defined: true }, // the bells: codex queue
+      { name: '--no-daemon', kind: 'flag', page: 'resume', defined: true }, // leg 2's e2e: no outliving daemon
+      { name: '--model', kind: 'flag', page: 'resume', defined: true }, // wake.sh -m <model>
+      { name: '--config', kind: 'flag', page: 'resume', defined: true }, // wake.sh -c developer_instructions=<head>
+      { name: '--thread', kind: 'flag', page: 'queue', defined: true },
+      { name: '--message', kind: 'flag', page: 'queue', defined: true },
+    ],
+    witness: 'rollout-developer-part',
+  };
+}
+
 const kindOf = (e) => {
   if (!e || typeof e !== 'object') return null;
   const sub = e.payload && typeof e.payload === 'object' ? e.payload.type : undefined;
@@ -85,6 +142,9 @@ function isContextItem(it) {
   if (it.type !== 'message') return false;
   if (it.role === 'developer' || it.role === 'system') return true;
   if (it.role !== 'user') return false;
+  // The first content part only: Codex 0.171.0 writes the environment and AGENTS.md rows as one part each. A future
+  // multi-part row is a known edge (Selvage's note on #90): anything this rule misses keeps a second head, which the
+  // witness's one-head count reports red.
   const first = Array.isArray(it.content) ? it.content[0]?.text : undefined;
   return typeof first === 'string' && CONTEXT_USER.some((p) => first.startsWith(p));
 }

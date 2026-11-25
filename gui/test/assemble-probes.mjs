@@ -555,6 +555,22 @@ const usageLine = (id, agoMs, ctxTokens, outTokens) => JSON.stringify({
     && u.windows[2].usedUsd === 4.2 && u.windows[2].limitUsd === 42 && u.windows[2].period === 'weekly',
     JSON.stringify(u?.windows));
 
+  // Leg 4: a codex lane's plan (paths.usageCodex, written by the watch in the same schema) is a second reading.
+  {
+    const ccfg = { ...ucfg, paths: { ...ucfg.paths, usageCodex: '/usage.codex.json' } };
+    const codexDoc = JSON.stringify({ at: iso(60e3), provider: 'openai', source: 'rollout', plan_type: 'plus',
+      rate_limits: { five_hour: { used_percentage: 2, resets_at: epoch(3600e3) }, seven_day: { used_percentage: 1, resets_at: epoch(86400e3) } } });
+    const io2 = { ...io(teeDoc(60e3, { five_hour: { used_percentage: 37, resets_at: epoch(3600e3) } })) };
+    const base = io2.readText;
+    io2.readText = (p) => (p === '/usage.codex.json' ? codexDoc : base(p));
+    const per = assemble(ccfg, io2, '8h').PERSONAS[0];
+    check('a codex plan reading → persona.usageCodex beside persona.usage, each its own provider',
+      per?.usage?.provider === 'anthropic' && per?.usage?.windows?.[0]?.pct === 37
+      && per?.usageCodex?.provider === 'openai' && per.usageCodex.windows.map((w) => w.key).join(',') === 'five_hour,seven_day'
+      && per.usageCodex.windows[0].pct === 2, JSON.stringify(per?.usageCodex));
+    check('no codex file → no usageCodex (nothing drawn without data)', assemble(ccfg, io(teeDoc(60e3, null)), '8h').PERSONAS[0].usageCodex === undefined);
+  }
+
   u = assemble(ucfg, io(teeDoc(60e3, null)), '8h').PERSONAS[0].usage;
   check('a tee file with rate_limits null (API-key account) → usage with empty windows, not a lie',
     u?.windows?.length === 0 && u?.stale === false, JSON.stringify(u));

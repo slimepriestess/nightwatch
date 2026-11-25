@@ -72,7 +72,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contextOfEntries, envWithConfig, loadConfig, loadConfigFrom, providerOf, windowForLane } from './config.mjs';
-import { codexHeadWitness, findRollout } from './codexlane.mjs';
+import { codexHeadWitness, codexUsageOf, findRollout } from './codexlane.mjs';
 
 const CFG = loadConfig();
 const W = CFG.watch;
@@ -651,6 +651,37 @@ function codexWitnessCheck(now) {
   if (keep.length > 200) for (const k of keep.slice(0, keep.length - 200)) delete state.codexWitnessed[k];
 }
 
+// Leg 4: a codex plan's windows for the persona card. Claude Code's come from its statusline (usage-tee.mjs); codex
+// has no statusline, but every token_count row in a rollout carries the plan's rate limits. So each tick reads the
+// tail of each codex lane's newest registered session and writes the newest reading to paths.usageCodex, in
+// usage.json's schema. A reading is plan-wide: the newest across the hub's codex lanes is the one shown.
+function codexUsageCheck() {
+  if (!P.usageCodex) return;
+  const newest = new Map();
+  let files = [];
+  try { files = readdirSync(P.wakecycle).filter((f) => f.startsWith('lane.')); } catch { return; }
+  for (const f of files) {
+    let e;
+    try { e = JSON.parse(readFileSync(join(P.wakecycle, f), 'utf8')); } catch { continue; }
+    if (e?.provider !== 'codex' || !e.lane || !CFG.lanes?.[e.lane]?.codexHome) continue;
+    const at = Date.parse(e.at) || 0;
+    if (!newest.has(e.lane) || at > newest.get(e.lane).at) newest.set(e.lane, { sid: f.slice('lane.'.length), at });
+  }
+  let best = null;
+  for (const [lane, { sid }] of newest) {
+    const file = findRollout(CFG.lanes[lane].codexHome, sid);
+    if (!file || file.endsWith('.zst')) continue;
+    const u = codexUsageOf(tailEntries(file));
+    if (u && (!best || Date.parse(u.at) > Date.parse(best.at))) best = { ...u, lane, session_id: sid };
+  }
+  if (!best) return;
+  let prev = null;
+  try { prev = JSON.parse(readFileSync(P.usageCodex, 'utf8')); } catch {}
+  if (prev && prev.at && Date.parse(prev.at) >= Date.parse(best.at)) return;
+  const tmp = `${P.usageCodex}.tmp.${process.pid}`;
+  try { writeFileSync(tmp, JSON.stringify(best) + '\n'); renameSync(tmp, P.usageCodex); } catch (err) { log(`codex usage write failed: ${err.message}`); }
+}
+
 function wakeCostCheck(now) {
   let rows = [];
   try { rows = readFileSync(P.folds, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return; }
@@ -848,6 +879,7 @@ function check() {
   try { l3DueCheck(now); } catch (e) { log(`l3-due check failed: ${e.message}`); }
   try { wakeCostCheck(now); } catch (e) { log(`wake-cost check failed: ${e.message}`); }
   try { codexWitnessCheck(now); } catch (e) { log(`codex witness check failed: ${e.message}`); }
+  try { codexUsageCheck(); } catch (e) { log(`codex usage check failed: ${e.message}`); }
   try { foldFailureCheck(); } catch (e) { log(`fold-failure check failed: ${e.message}`); }
   if (JSON.stringify(state) !== before) saveState();
 }

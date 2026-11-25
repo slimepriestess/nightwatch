@@ -134,3 +134,102 @@ export function codexHeadWitness({ rows, appendedFrom, head }) {
   if (seen === 0) return { status: 'missing', ...facts };
   return { status: 'ok', ...facts };
 }
+
+/**
+ * Leg 4: a codex plan's rate-limit windows, as usage.json's schema has them, from a rollout's rows. Codex writes them
+ * on every event_msg/token_count: payload.rate_limits.{primary, secondary}, each { used_percent, window_minutes,
+ * resets_at (epoch seconds) }, with plan_type beside them (codex-cli 0.171.0, read off the sandbox's rollouts). A
+ * window is keyed by its length the way the persona card already names Claude's: 300 minutes is five_hour, 10080 is
+ * seven_day, anything else its own `<n>m` (shown, never guessed into a known name). The newest row with windows wins;
+ * null when there is none.
+ */
+export const CODEX_WINDOW_KEYS = { 300: 'five_hour', 10080: 'seven_day' };
+export function codexUsageOf(rows) {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (r?.type !== 'event_msg' || r.payload?.type !== 'token_count') continue;
+    const rl = r.payload.rate_limits;
+    if (!rl || typeof rl !== 'object') continue;
+    const windows = {};
+    for (const slot of ['primary', 'secondary']) {
+      const w = rl[slot];
+      if (!w || typeof w !== 'object' || typeof w.window_minutes !== 'number') continue;
+      const key = CODEX_WINDOW_KEYS[w.window_minutes] ?? `${w.window_minutes}m`;
+      windows[key] = {
+        ...(typeof w.used_percent === 'number' ? { used_percentage: w.used_percent } : {}),
+        ...(typeof w.resets_at === 'number' ? { resets_at: w.resets_at } : {}),
+      };
+    }
+    if (!Object.keys(windows).length) continue;
+    return {
+      at: typeof r.timestamp === 'string' ? r.timestamp : null,
+      provider: 'openai',
+      source: 'rollout',
+      ...(typeof rl.plan_type === 'string' ? { plan_type: rl.plan_type } : {}),
+      rate_limits: windows,
+    };
+  }
+  return null;
+}
+
+/**
+ * Leg 6: a codex lane's own CODEX_HOME needs the registration hook (register-lane.sh from Codex's SessionStart, as
+ * leg 2 proved), and Codex runs a hook only once it is TRUSTED: an untrusted one is skipped silently (probe Q2).
+ * Trust is what Codex's own UI writes: `codex app-server` (stdio, short-lived, no model call, works before any login)
+ * `hooks/list` names the hook's key and currentHash, and `config/value/write` upserts hooks.state.<key>.trusted_hash.
+ * The hash covers the hook entry, so an edited hook reads untrusted again until re-trusted.
+ */
+export function laneHooksJson(machineryDir) {
+  return JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `bash ${join(machineryDir, 'register-lane.sh')}`, timeout: 10 }] }] } }, null, 2) + '\n';
+}
+
+/** One JSON-RPC conversation with `codex app-server` over stdio: calls in order, results in order. */
+export async function appServerRpc({ codexBin, codexHome, cwd, calls, timeoutMs = 30_000, spawnFn }) {
+  const { spawn } = await import('node:child_process');
+  const child = (spawnFn ?? spawn)(codexBin, ['app-server'], { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, CODEX_HOME: expandHome(codexHome) } });
+  let buf = '';
+  let n = 0;
+  const waiting = new Map();
+  child.stdout.on('data', (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      let m; try { m = JSON.parse(line); } catch { continue; }
+      if (m.id !== undefined && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
+    }
+  });
+  child.stderr.on('data', () => {});
+  const call = (method, params) => new Promise((res) => { const id = ++n; waiting.set(id, res); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); });
+  const timer = setTimeout(() => { try { child.kill(); } catch {} }, timeoutMs);
+  const died = new Promise((_, rej) => child.on('exit', () => rej(new Error('codex app-server exited before answering'))));
+  try {
+    await Promise.race([call('initialize', { clientInfo: { name: 'nightwatch', version: '0' } }), died]);
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'initialized' }) + '\n');
+    const out = [];
+    for (const [method, params] of calls) out.push(await Promise.race([call(method, params), died]));
+    return out;
+  } finally { clearTimeout(timer); try { child.kill(); } catch {} }
+}
+
+/** Trust the lane's SessionStart hook (the one in <codexHome>/hooks.json). rpc(calls) → results; injectable for tests. */
+export async function trustLaneHook({ codexHome, rpc }) {
+  const hooksPath = join(expandHome(codexHome), 'hooks.json');
+  const find = (res) => {
+    if (res?.error) throw new Error(`codex app-server refused hooks/list: ${res.error.message ?? JSON.stringify(res.error)}`);
+    const all = (res?.result?.data ?? []).flatMap((d) => d.hooks ?? []);
+    return all.find((h) => h.sourcePath === hooksPath && h.eventName === 'sessionStart') ?? null;
+  };
+  const [listed] = await rpc([['hooks/list', {}]]);
+  const hook = find(listed);
+  if (!hook) throw new Error(`codex does not list the SessionStart hook in ${hooksPath}`);
+  if (hook.trustStatus === 'trusted') return { key: hook.key, hash: hook.currentHash, wrote: false };
+  const [wrote, again] = await rpc([
+    ['config/value/write', { keyPath: 'hooks.state', mergeStrategy: 'upsert', value: { [hook.key]: { trusted_hash: hook.currentHash } } }],
+    ['hooks/list', {}],
+  ]);
+  if (wrote?.error) throw new Error(`codex refused to record the hook's trust: ${wrote.error.message ?? JSON.stringify(wrote.error)}`);
+  const after = find(again);
+  if (after?.trustStatus !== 'trusted') throw new Error(`codex still reads the hook as ${after?.trustStatus ?? 'missing'} after trusting it`);
+  return { key: hook.key, hash: hook.currentHash, wrote: true };
+}
