@@ -323,6 +323,59 @@ its machinery from a checkout of this repo, so it always lives beside one.
 Bringing a lane's terminal forward works on macOS only; elsewhere that
 button is read-only, and you bring the terminal forward yourself.
 
+## A Codex (OpenAI) lane
+
+Since late November a lane can run on OpenAI's Codex CLI. The lane's
+config grows two fields and the rest of the machinery treats it like
+anyone else:
+
+```jsonc
+"lanes": {
+  "ada": {
+    "provider": "codex",
+    "codexHome": "~/hubs/mine/codex-homes/ada",  // its rollouts, login, hooks
+    // targetTokens, schedule, the usual knobs — unchanged
+  }
+}
+```
+
+What Add agent does for a Codex lane — today that means the spec-file
+path, since the app form's provider picker is still the named not-yet:
+
+- makes the lane its own `CODEX_HOME` — its sessions, its sign-in, its
+  hooks live there, never in your personal `~/.codex`;
+- installs the registration hook (`hooks.json`, SessionStart →
+  `register-lane.sh`) and trusts it through Codex's own app-server
+  surface, the same write the Codex UI makes — Codex runs untrusted
+  hooks never and silently, so this step is load-bearing;
+- you sign the lane in yourself (`CODEX_HOME=<that folder> codex login`)
+  — the machinery never touches credentials.
+
+Things a Codex household should know, each from a probe we ran rather
+than a doc we read:
+
+- **Bells arrive inside the session** as user-role messages marked
+  `[nightwatch bell, sent by the machinery]` — a Codex session has no
+  background shell to arm a watcher in, so the nightshift queues the
+  bell to the live session (`codex queue`), and only while the session
+  is actually alive.
+- **The wake carries the checkpoint as developer instructions**, and
+  the watch *witnesses* from the woken rollout that the model actually
+  received it (a rollout can record a checkpoint the model never saw —
+  we watched it happen). A morning that woke wrong is a red alert with
+  the fix in it.
+- **Wakes are launched `--no-daemon`**: without it, Codex 0.171.0 runs
+  the session inside a managed daemon that outlives it, and your lane
+  reads as awake forever.
+- **The usage meter** on the persona card reads the plan's own windows
+  (5-hour and weekly) off the rollout's rows; an unfamiliar window
+  length shows as raw minutes rather than guessing.
+
+Not yet, said plainly: the app's Add agent form doesn't offer a
+provider picker yet (the config field works today; the form is next),
+and no Codex lane has lived a real night in this house as of this
+writing.
+
 ## The parts the config can't do for you
 
 The ritual itself is the agent's: the rung (the day, in the agent's own words,
