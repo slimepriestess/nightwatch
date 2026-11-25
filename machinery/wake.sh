@@ -68,6 +68,32 @@ DEFAULT_LANE="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get defaultLane)" || {
 LANE="${1:-$DEFAULT_LANE}"
 NEXT="$STATE_DIR/next-wake.$LANE.json"
 [ -f "$NEXT" ] || { echo "no next-wake.$LANE.json — did that lane sleep?"; exit 1; }
+# The lane's provider rides every event this script writes (providers r1), resolved the way
+# register-lane.sh resolves it; it also picks the runtime this wake launches.
+WEFT_PROVIDER="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get "lanes.$LANE.provider" 2>/dev/null)" || WEFT_PROVIDER=""
+[ -n "$WEFT_PROVIDER" ] || WEFT_PROVIDER=claude-code
+# A codex lane (anima_dev/nightwatch_codex_lane_plan.md, leg 2) wakes with `codex resume` in its own
+# CODEX_HOME. Two refusals come first, logged where the morning reads:
+#  - no codexHome: its rollouts and login live there, so there is nothing to wake into;
+#  - no way yet to put the checkpoint in its head (leg 3, with a witness). A wake without the
+#    checkpoint is an unauthored morning, which the welfare rider rules out, so a codex lane does
+#    not wake until leg 3 lands. NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT=1 is the test hatch for
+#    leg 2's own end-to-end run, and says so in the log.
+if [ "$WEFT_PROVIDER" = codex ]; then
+  CODEX_HOME_DIR="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get "lanes.$LANE.codexHome" 2>/dev/null)" || CODEX_HOME_DIR=""
+  case "$CODEX_HOME_DIR" in "~/"*) CODEX_HOME_DIR="$HOME/${CODEX_HOME_DIR#\~/}" ;; esac
+  if [ -z "$CODEX_HOME_DIR" ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE FAILED for $LANE: a codex lane with no lanes.$LANE.codexHome — refusing to launch" >> "$WEFT_LOG"
+    echo "WAKE FAILED: codex lane $LANE has no codexHome"
+    exit 7
+  fi
+  if [ -z "${NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT:-}" ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE REFUSED for $LANE: a codex lane can't yet carry its checkpoint into the woken session (leg 3) — refusing an unauthored morning" >> "$WEFT_LOG"
+    echo "WAKE REFUSED: codex lane $LANE — checkpoint injection (leg 3) isn't built yet"
+    exit 7
+  fi
+  echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake for $LANE: NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT set — this codex wake carries NO checkpoint (test hatch, leg 2)" >> "$WEFT_LOG"
+fi
 # A first-wake receipt (lane-add/init writes it) has no tail to resume:
 # a brand-new lane starts a FRESH session — same head, same registry
 # confirmation, no --resume (design: nightwatch_lane_creation.md).
@@ -113,14 +139,17 @@ CP=$(python3 -c "import json;print(json.load(open('$NEXT')).get('checkpoint','')
 # WEFT_WAKE_DOUBLE_OK=1 (same shape as the stale-receipt hatch).
 if [ -z "${WEFT_WAKE_DOUBLE_OK:-}" ]; then
   FROM=$(python3 -c "import json;print(json.load(open('$NEXT')).get('from',''))")
-  if [ -z "$FIRSTWAKE" ] && { pgrep -f "claude --resume $SID" >/dev/null 2>&1 || { [ -n "$FROM" ] && pgrep -f "claude --resume $FROM" >/dev/null 2>&1; }; }; then
-    echo "ALREADY AWAKE: a live claude process already resumes this receipt (tail $SID). WEFT_WAKE_DOUBLE_OK=1 to force."
+  # The runtime's own resume command: claude's `--resume <id>`, codex's `resume <id>`.
+  if [ "$WEFT_PROVIDER" = codex ]; then RESUMES="codex resume"; else RESUMES="claude --resume"; fi
+  if [ -z "$FIRSTWAKE" ] && { pgrep -f "$RESUMES $SID" >/dev/null 2>&1 || { [ -n "$FROM" ] && pgrep -f "$RESUMES $FROM" >/dev/null 2>&1; }; }; then
+    echo "ALREADY AWAKE: a live $WEFT_PROVIDER process already resumes this receipt (tail $SID). WEFT_WAKE_DOUBLE_OK=1 to force."
     echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake refused for $LANE: receipt tail already resumed by a live process" >> "$WEFT_LOG"
     exit 5
   fi
-  if ! python3 - "$STATE_DIR" "$LANE" <<'DOUBLEEOF'
+  if ! python3 - "$STATE_DIR" "$LANE" "$WEFT_PROVIDER" <<'DOUBLEEOF'
 import json, os, subprocess, sys
 wc, lane = sys.argv[1], sys.argv[2]
+runtime = 'codex' if sys.argv[3] == 'codex' else 'claude'
 for f in os.listdir(wc):
     if not f.startswith('lane.'): continue
     try:
@@ -132,10 +161,10 @@ for f in os.listdir(wc):
         # session and macOS recycles pids, so a stale entry's pid will
         # eventually belong to some unrelated process — and a false
         # ALREADY AWAKE here costs the whole 08:00 wake. Only a pid whose
-        # command is claude counts (same rule as the daemon's lsof walk).
+        # command is the lane's runtime counts (same rule as the daemon's lsof walk).
         cmd = subprocess.run(['ps', '-p', str(pid), '-o', 'command='],
                              capture_output=True, text=True).stdout
-        if 'claude' not in cmd: continue
+        if runtime not in cmd: continue
     except Exception: continue
     print(f"ALREADY AWAKE: lane {lane} has a live registered session ({f[5:13]}…, pid {e['pid']}). WEFT_WAKE_DOUBLE_OK=1 to force.")
     sys.exit(1)
@@ -208,10 +237,6 @@ echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) wake receipt: $LANE lane reached exec (
 # Event-stream twin: the receipt's JSON echo, best-effort (events path from
 # config; a resolution failure here must never block the exec below).
 WEFT_EVENTS="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get paths.events 2>/dev/null)" || WEFT_EVENTS=""
-# The lane's provider rides every event this script writes (providers r1),
-# resolved the way register-lane.sh resolves it.
-WEFT_PROVIDER="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get "lanes.$LANE.provider" 2>/dev/null)" || WEFT_PROVIDER=""
-[ -n "$WEFT_PROVIDER" ] || WEFT_PROVIDER=claude-code
 [ -n "$WEFT_EVENTS" ] && echo "{\"at\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"kind\":\"wake-exec\",\"lane\":\"$LANE\",\"provider\":\"$WEFT_PROVIDER\",\"tail\":\"$SID\"}" >> "$WEFT_EVENTS" 2>/dev/null || true
 # The SessionStart hook (register-lane.sh) reads this to write the session→lane
 # registry — the id itself only exists once claude mints the forked session.
@@ -246,9 +271,26 @@ LAUNCHED_AT=$(date +%s)
 { cp "$HEAD" "$STATE_DIR/last-head.$LANE.tmp.$$" && mv -f "$STATE_DIR/last-head.$LANE.tmp.$$" "$STATE_DIR/last-head.$LANE"; } 2>/dev/null \
   || rm -f "$STATE_DIR/last-head.$LANE.tmp.$$" 2>/dev/null || true
 set +e
-set -- --append-system-prompt-file "$HEAD" --system-prompt-snapshot off
-[ -n "$MODEL" ] && set -- --model "$MODEL" "$@"
-[ -z "$FIRSTWAKE" ] && set -- --resume "$SID" --fork-session "$@"
+if [ "$WEFT_PROVIDER" = codex ]; then
+  # `codex resume [OPTIONS] <id> [PROMPT]`, or `codex [OPTIONS] [PROMPT]` for a first wake. No fork: the
+  # fold already wrote a fresh id, and a plain resume appends to that file (probe P3). The head isn't
+  # passed: putting the checkpoint in is leg 3 (see the refusal above).
+  # --no-daemon keeps the session in this window's own process. Without it 0.171.0 runs sessions in a
+  # managed app-server daemon that it installs under CODEX_HOME and that outlives the window (leg 2's
+  # end-to-end, 11/24): the SessionStart hook then ran under the daemon, so the registry named a pid
+  # that stayed alive after the session ended, and the lane would have read as awake forever.
+  # The id comes right after `resume`, so the already-awake guard's `codex resume <id>` still matches the
+  # running command line (the e2e's second run put --no-daemon between them, and only the registry caught it).
+  set --
+  [ -z "$FIRSTWAKE" ] && set -- resume "$SID"
+  set -- "$@" --no-daemon
+  [ -n "$MODEL" ] && set -- "$@" -m "$MODEL"
+  export CODEX_HOME="$CODEX_HOME_DIR"
+else
+  set -- --append-system-prompt-file "$HEAD" --system-prompt-snapshot off
+  [ -n "$MODEL" ] && set -- --model "$MODEL" "$@"
+  [ -z "$FIRSTWAKE" ] && set -- --resume "$SID" --fork-session "$@"
+fi
 # The lane's wake prompt (lanes.<name>.wakePrompt; unset = no prompt, today's
 # behavior): claude's positional [prompt], so it is the woken session's first
 # user turn and the lane starts its morning on its own instead of idling at
@@ -308,6 +350,11 @@ fi
 # an npm/nvm install lives somewhere the default ~/.local/bin guess isn't.
 CLAUDE_BIN="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get paths.claudeBin 2>/dev/null)" || CLAUDE_BIN=""
 [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ] || CLAUDE_BIN=claude
+# A codex lane runs codex: paths.codexBin when it's set and there, PATH's otherwise.
+if [ "$WEFT_PROVIDER" = codex ]; then
+  CLAUDE_BIN="$("$NODE" "$WAKECYCLE_DIR/config.mjs" get paths.codexBin 2>/dev/null)" || CLAUDE_BIN=""
+  [ -n "$CLAUDE_BIN" ] && [ -x "$CLAUDE_BIN" ] || CLAUDE_BIN=codex
+fi
 if [ -n "${WEFT_WAKE_EXEC:-}" ]; then exec "$CLAUDE_BIN" "$@"; fi
 "$CLAUDE_BIN" "$@" 2>"$STDERR_CAP"
 RC=$?

@@ -46,13 +46,21 @@ fi
 # One find for the week-old entries, not one per entry: this runs at every start.
 find "$REG" -maxdepth 1 -type f -name 'lane.*' -mtime +7 2>/dev/null | while IFS= read -r f; do
   pid=$(sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p' "$f")
-  if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q claude; then continue; fi
+  if [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -qE 'claude|codex'; then continue; fi
   rm -f "$f"
 done
 [ -z "$NW_LANE" ] && exit 0
+# The lane's provider rides the entry (providers r1): rows are self-describing,
+# so readers never have to join against the config to know the runtime. It also
+# names the runtime to look for below: a codex lane (leg 2) runs this same hook
+# from Codex's SessionStart, whose stdin carries session_id the same way (probe Q2).
+PROVIDER="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.provider" 2>/dev/null)" || PROVIDER=""
+[ -n "$PROVIDER" ] || PROVIDER=claude-code
+if [ "$PROVIDER" = codex ]; then RUNTIME=codex; else RUNTIME=claude; fi
 SESSION_ID=$(python3 -c "import json,sys; print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
 [ -z "$SESSION_ID" ] && exit 0
-# The claude that ran this hook: $PPID where it runs the hook directly (macOS),
+# The runtime that ran this hook (claude, or codex for a codex lane, whose hook's parent is
+# the native codex binary: probe Q2): $PPID where it runs the hook directly (macOS),
 # else the nearest ancestor whose executable is claude, found now while the
 # chain is alive, since Claude Code on WSL runs hooks through a shell that's
 # gone by the time anything reads the entry (marginalia's run, #73). Matched
@@ -62,18 +70,18 @@ CLAUDE_PID=$PPID
 p=$PPID; hops=0
 while [ -n "$p" ] && [ "$p" -gt 1 ] 2>/dev/null && [ "$hops" -lt 8 ]; do
   exe=$(ps -p "$p" -o command= 2>/dev/null | awk '{print $1}')
-  case "${exe##*/}" in claude) CLAUDE_PID=$p; break ;; esac
+  # Never codex's app-server: a managed daemon that can outlive the session it ran the hook for (leg 2's
+  # end-to-end, 11/24). wake.sh starts codex with --no-daemon; this keeps a daemon from being taken if one runs.
+  if [ "${exe##*/}" = "$RUNTIME" ] && ! ps -p "$p" -o command= 2>/dev/null | grep -q ' app-server'; then CLAUDE_PID=$p; break; fi
   p=$(ps -p "$p" -o ppid= 2>/dev/null | tr -d ' ')
   hops=$((hops + 1))
 done
-# The lane's provider rides the entry (providers r1): rows are self-describing,
-# so readers never have to join against the config to know the runtime.
-PROVIDER="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.provider" 2>/dev/null)" || PROVIDER=""
-[ -n "$PROVIDER" ] || PROVIDER=claude-code
 printf '{"lane":"%s","pid":%d,"provider":"%s","at":"%s"}\n' "$NW_LANE" "$CLAUDE_PID" "$PROVIDER" \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$REG/lane.$SESSION_ID"
 SWITCH="$("$NODE" "$SELF_DIR/config.mjs" get "lanes.$NW_LANE.switchboard" 2>/dev/null || echo false)"
-if [ "$SWITCH" != "true" ]; then
+# A codex session has no background tasks to arm a watcher in: its bells arrive as `codex queue`
+# messages while it's live (probe Q1), so it gets no watcher line.
+if [ "$SWITCH" != "true" ] && [ "$RUNTIME" != codex ]; then
   CFGPFX=""
   [ -n "$NW_CFG" ] && CFGPFX="NIGHTWATCH_CONFIG=$NW_CFG "
   echo "Nightwatch: this session is the $NW_LANE lane. Arm your bell watcher now, as a background task: ${CFGPFX}sh $SELF_DIR/bell-watcher.sh $NW_LANE — its exit is your sleep-bell (or a Fold now). When it fires: read the note, do what it says, delete the note file, and re-arm the watcher if you're staying up."
