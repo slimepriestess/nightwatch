@@ -131,6 +131,9 @@ export const DEFAULTS = {
     // the hub's person points their Claude Code statusLine at it with
     // --out <this path>; nothing here runs it.
     usage: 'wakecycle/usage.json',
+    // A codex lane's plan windows (OpenAI's, separate from the one above), written by the watch from the newest
+    // token_count row in a codex lane's rollout (codex lane leg 4). Same schema as usage.json, provider "openai".
+    usageCodex: 'wakecycle/usage.codex.json',
     // Claude Code's live session status files (pid, sessionId, status).
     sessions: join(HOME, '.claude', 'sessions'),
     armedFile: 'wakecycle/nightshift.armed',

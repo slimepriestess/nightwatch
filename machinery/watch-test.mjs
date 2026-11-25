@@ -711,6 +711,8 @@ check("midday: a stale request from an ended session doesn't silence the next on
     ['nohead', 'witness-good.jsonl', 24, BIRCH, now - 5 * 3600_000, true], // saved before the fold: not this wake's
     ['pending', 'witness-good.jsonl', 24, BIRCH, now - 90 * 60_000, true, 30],
     ['asleep', 'witness-missing.jsonl', 30, BIRCH, now - 90 * 60_000, false], // folded, not yet woken (no registry entry)
+    // Selvage's race (#90): a second fold/wake between ticks rewrote the head after this wake began: not this wake's.
+    ['raced', 'witness-good.jsonl', 24, BIRCH, now - 10 * 60_000, true],
   ];
   const lanes = {};
   const folds = [];
@@ -738,19 +740,29 @@ check("midday: a stale request from an ended session doesn't silence the next on
   const h1 = heads();
   check('codex witness: a missing, a doubled and an unsaved head each raise head-not-in-prompt, red, with its reason',
     h1.map((e) => [e.lane, e.reason, e.alarm, e.provider]).sort(),
-    [['doubled', 'doubled', true, 'codex'], ['missing', 'missing', true, 'codex'], ['nohead', 'unwitnessed', true, 'codex']]);
+    [['doubled', 'doubled', true, 'codex'], ['missing', 'missing', true, 'codex'], ['nohead', 'unwitnessed', true, 'codex'], ['raced', 'unwitnessed', true, 'codex']]);
   check('codex witness: the doubled one is caught with its checkpoint present (presence is not enough)', h1.find((e) => e.lane === 'doubled')?.seen, 1);
   check('codex witness: a good wake, an unfinished turn and an unwoken fold raise nothing', ['good', 'pending', 'asleep'].filter((l) => h1.some((e) => e.lane === l)), []);
   const cs = lines(csent);
   check('codex witness: one notice per bad wake, saying it woke without its checkpoint',
-    cs.map((m) => [m.lane, m.cause, m.title]).sort(), [['doubled', 'doubled', 'Woke without its checkpoint'], ['missing', 'missing', 'Woke without its checkpoint'], ['nohead', 'unwitnessed', 'Woke without its checkpoint']]);
+    cs.map((m) => [m.lane, m.cause, m.title]).sort(), [['doubled', 'doubled', 'Woke without its checkpoint'], ['missing', 'missing', 'Woke without its checkpoint'], ['nohead', 'unwitnessed', 'Woke without its checkpoint'], ['raced', 'unwitnessed', 'Woke without its checkpoint']]);
   check('codex witness: the notice says "agent"-words, never "lane"', cs.every((m) => !/\blanes?\b/i.test(`${m.title} ${m.body}`)), true);
   // The unfinished turn finishes; the second tick witnesses it, and tells nothing again.
   writeFileSync(files.pending.path, files.pending.rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
   tick(ccfg);
-  check('codex witness: a second tick tells nothing again, and the finished turn is witnessed good', [heads().length, lines(csent).length], [3, 3]);
+  check('codex witness: a second tick tells nothing again, and the finished turn is witnessed good', [heads().length, lines(csent).length], [4, 4]);
   const wlog = existsSync(join(croot, 'watch.log')) ? readFileSync(join(croot, 'watch.log'), 'utf8') : '';
   check('codex witness: the good wakes are logged as witnessed', ['good', 'pending'].filter((l) => wlog.includes(`codex wake head witnessed for ${l} `)), ['good', 'pending']);
+  // Leg 4: the plan's windows land in usage.codex.json (paths.usageCodex's default), the newest reading across lanes.
+  const uc = existsSync(join(croot, 'wakecycle', 'usage.codex.json')) ? JSON.parse(readFileSync(join(croot, 'wakecycle', 'usage.codex.json'), 'utf8')) : null;
+  check('codex usage: the newest plan reading lands in usage.codex.json, tagged openai, Claude\'s usage.json untouched',
+    [uc?.provider, uc?.source, Object.keys(uc?.rate_limits ?? {}).sort().join(','), typeof uc?.rate_limits?.five_hour?.used_percentage, existsSync(join(croot, 'wakecycle', 'usage.json'))],
+    ['openai', 'rollout', 'five_hour,seven_day', 'number', false]);
+  const newestTc = Math.max(...Object.values(files).flatMap((f) => f.rows.filter((r) => r.payload?.type === 'token_count' && r.payload.rate_limits).map((r) => Date.parse(r.timestamp))));
+  check('codex usage: it is the newest token_count among the lanes\' registered sessions', Date.parse(uc?.at), newestTc);
+  writeFileSync(join(croot, 'wakecycle', 'usage.codex.json'), JSON.stringify({ ...uc, at: iso(now + 3600_000), marker: 'newer' }));
+  tick(ccfg);
+  check('codex usage: an older reading never replaces a newer one', JSON.parse(readFileSync(join(croot, 'wakecycle', 'usage.codex.json'), 'utf8')).marker, 'newer');
   if (!fail) rmSync(croot, { recursive: true, force: true });
   else console.log(`(codex scratch kept: ${croot})`);
 }

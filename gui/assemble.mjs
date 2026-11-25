@@ -316,9 +316,11 @@ const RANGE_LABEL = { '8h': 'Last 8 hours', '24h': 'Last 24 hours', '3d': 'Last 
 // resets_at has passed (its percentage describes a window that ended).
 const USAGE_WINDOW_ORDER = ['five_hour', 'seven_day', 'spend_limit'];
 const USAGE_STALE_MS = 15 * 60_000;
-function usageFor(cfg, io, nowMs) {
-  if (!cfg.paths?.usage) return undefined;
-  const raw = io.readText(cfg.paths.usage);
+// path: Claude Code's tee file (paths.usage) by default; a codex lane's plan comes from paths.usageCodex, which the
+// watch writes in the same schema (codex lane leg 4).
+function usageFor(cfg, io, nowMs, path = cfg.paths?.usage) {
+  if (!path) return undefined;
+  const raw = io.readText(path);
   if (!raw) return undefined;
   let doc;
   try { doc = JSON.parse(raw); } catch { return undefined; }
@@ -436,6 +438,9 @@ export function assemble(cfg, io, range = '8h') {
   const persona = { id: cfg.persona?.id ?? folder.toLowerCase(), name: personaName };
   const usage = usageFor(cfg, io, nowMs);
   if (usage) persona.usage = usage;
+  // A second plan when the hub runs a codex lane: OpenAI's windows, drawn beside the first (leg 4).
+  const usageCodex = usageFor(cfg, io, nowMs, cfg.paths?.usageCodex);
+  if (usageCodex) persona.usageCodex = usageCodex;
   const LANES = Object.keys(cfg.lanes ?? {}).map((id) => {
     const lc = laneCfg(cfg, id);
     const r = reg[id];

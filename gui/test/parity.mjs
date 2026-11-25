@@ -124,6 +124,9 @@ const CASES = {
       { key: 'spend_limit', pct: 81.5, resetsAt: '2026-11-01T07:00:00.000Z', expired: false, usedUsd: 40.75, limitUsd: 50, period: 'month' },
       { key: 'fable_week', pct: 12, resetsAt: '2026-10-07T16:00:00.000Z', expired: false },
       { key: 'some_new_window', pct: null, resetsAt: null, expired: false },
+    ] }, usageCodex: { provider: 'openai', at: '2026-10-05T20:09:00.000Z', stale: false, model: null, windows: [
+      { key: 'five_hour', pct: 2, resetsAt: '2026-10-05T23:00:00.000Z', expired: false },
+      { key: 'seven_day', pct: 1, resetsAt: '2026-10-11T16:00:00.000Z', expired: false },
     ] } };
     const lark = { id: 'lark', name: 'Lark', usage: { provider: 'anthropic', at: '2026-10-05T20:09:30.000Z', stale: false, model: 'claude-haiku-4-5', windows: [
       { key: 'five_hour', pct: 3, resetsAt: '2026-10-05T21:15:00.000Z', expired: false },

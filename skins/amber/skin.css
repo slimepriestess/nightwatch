@@ -752,6 +752,11 @@ html[data-gallery="1"] .nw-gallery { grid-area: gallery; display: grid; grid-tem
    centre is the flip button, and the exact percentage and the reset time are in the tip. The spine's column is as tall
    as the row's tallest card, so the ring costs nothing while any card in the row is open. */
 :is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage"] { flex: none; margin: 8px 0 auto; } /* right under the lights; the free height goes below it */
+/* Two plans (a codex lane's beside Claude's; codex lane leg 4): stacked under the lights, the free height below the
+   last one only. The second plan's meter wears the ink, not a state colour, so it can't read as a lane's state. */
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage"]:has(+ [data-part="usage"]) { margin-bottom: 0; }
+:is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage"] + [data-part="usage"] { margin-top: 6px; }
+[data-part="usage"][data-provider="openai"] { --meter: var(--nw-ink); }
 :is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] { grid-template-columns: 22px; grid-template-rows: 22px; }
 :is(.nw-app:not([data-layout="stack"], [data-layout="column"])) [data-part="usage-window"] [data-part="bar"] { grid-area: 1 / 1; width: 22px; height: 22px; border-radius: 50%;
   background: conic-gradient(color-mix(in srgb, var(--meter) 65%, #fff), var(--meter) calc(var(--fill) * 1turn), var(--nw-sunk) 0); /* the skin's track shadow stays, as its bevel */
