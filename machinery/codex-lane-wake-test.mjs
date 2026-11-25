@@ -16,9 +16,15 @@ function check(name, fn) {
   catch (e) { fail++; console.log(`  ✗ ${name}\n    ${e.message}`); }
 }
 
-function hub({ receipt = { sessionId: SID }, lane = {} } = {}) {
+function hub({ receipt = { sessionId: SID }, lane = {}, rollout = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'nw-codex-wake-'));
   for (const d of ['wakecycle', 'ladder', 'bin', 'codex-home']) mkdirSync(join(root, d), { recursive: true });
+  // The tail's rollout, where codex keeps it: wake.sh refuses a resume whose rollout isn't there (codex would start
+  // a fresh session without a word).
+  if (rollout) {
+    mkdirSync(join(root, 'codex-home', 'sessions', '2020', '01', '01'), { recursive: true });
+    writeFileSync(join(root, 'codex-home', 'sessions', '2020', '01', '01', `rollout-2020-01-01T00-00-00-${SID}.jsonl`), '{"type":"session_meta","payload":{}}\n');
+  }
   const stub = join(root, 'bin', 'codex-stub');
   writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" > "${join(root, 'codex.argv')}"\nprintf '%s' "\${CODEX_HOME-unset}" > "${join(root, 'codex.home')}"\nexit 0\n`);
   chmodSync(stub, 0o755);
@@ -105,8 +111,15 @@ try {
     assert.deepEqual(split(r).rest, ['--no-daemon', '-m', 'gpt-test']);
     assert.ok(split(r).dev?.includes('## Standing wake duties'), 'a first wake carries the head too');
   });
-  check('a codexHome written as ~/… is expanded to the home folder', () => {
-    const r = mk({ lane: { codexHome: '~/.nightwatch-test-codex-home' } });
+  check('a tail whose rollout is not under the lane\'s CODEX_HOME is refused (exit 7, logged, codex never runs)', () => {
+    const r = mk({ rollout: false });
+    const res = wake(r, HATCH);
+    assert.equal(res.status, 7, res.stdout + res.stderr);
+    assert.match(log(r), new RegExp(`WAKE REFUSED for main: no rollout for tail ${SID}`));
+    assert.equal(existsSync(join(r, 'codex.argv')), false);
+  });
+  check('a codexHome written as ~/… is expanded to the home folder (a first wake: no tail to look for)', () => {
+    const r = mk({ receipt: { firstWake: true, created: true }, lane: { codexHome: '~/.nightwatch-test-codex-home' } });
     const res = wake(r, HATCH);
     assert.equal(res.status, 0, res.stdout + res.stderr);
     assert.equal(readFileSync(join(r, 'codex.home'), 'utf8'), join(homedir(), '.nightwatch-test-codex-home'));

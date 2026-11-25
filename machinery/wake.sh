@@ -285,6 +285,14 @@ if [ "$WEFT_PROVIDER" = codex ]; then
   # that stayed alive after the session ended, and the lane would have read as awake forever.
   # The id comes right after `resume`, so the already-awake guard's `codex resume <id>` still matches the
   # running command line (the e2e's second run put --no-daemon between them, and only the registry caught it).
+  # The tail's rollout must be on disk under the lane's CODEX_HOME: given an id it can't find, `codex resume` starts
+  # a FRESH session without a word (11/25, sandbox), which would be an unauthored morning the witness never sees (it
+  # watches the tail's file, which would get no rows).
+  if [ -z "$FIRSTWAKE" ] && [ -z "$(find "$CODEX_HOME_DIR/sessions" -type f \( -name "rollout-*-$SID.jsonl" -o -name "rollout-*-$SID.jsonl.zst" \) 2>/dev/null | head -n 1)" ]; then
+    echo "$(date -u +%Y-%m-%dT%H:%M:%S.000Z) WAKE REFUSED for $LANE: no rollout for tail $SID under $CODEX_HOME_DIR/sessions — codex would start a fresh session instead; refusing an unauthored morning" >> "$WEFT_LOG"
+    echo "WAKE REFUSED: codex lane $LANE — the tail's rollout isn't under its CODEX_HOME"
+    exit 7
+  fi
   set --
   [ -z "$FIRSTWAKE" ] && set -- resume "$SID"
   set -- "$@" --no-daemon
