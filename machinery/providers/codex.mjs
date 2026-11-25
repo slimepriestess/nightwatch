@@ -18,10 +18,17 @@
  *     refuses any tail that still carries one, as trim's usage check does for Claude Code;
  *   - no token_usage_record either: it is accounting, never sent, and whether resume seeds anything from it
  *     is unestablished (P8 did not inflate it), so it does not travel.
- * A tail opens at a turn's start (event_msg/task_started). Base instructions, tool declarations and the
- * environment come once, in the session's first turn (P1); a later turn repeats only some of them. So a
- * cut past the first turn keeps the first turn's preamble (its rows before its turn_context) ahead of the
- * tail, the way a system prompt stays.
+ * A tail opens at a turn's start (event_msg/task_started). The folded file carries NO initial context: no
+ * tool declarations, no developer rows, no environment or AGENTS.md rows, no world_state, no turn_context,
+ * and none inside a compacted row's replacement history either. Codex builds a session's head (base prompt,
+ * tools, environment, and the -c developer_instructions that carry the checkpoint) only when the file has no
+ * turn_context baseline, and then appends it whole. Leg 3's probe (11/25, four turns on one sandbox session):
+ *   - kept as before (the first turn's preamble and the turn_context rows): the checkpoint never reached the
+ *     model, silently;
+ *   - turn_context alone stripped: the rollout recorded the checkpoint beside a doubled head, and the model
+ *     answered that it had none, twice; a row in the file is not a row the model read;
+ *   - every initial-context row stripped: one fresh head, the checkpoint read, the history kept.
+ * So a wake rebuilds exactly one head, and the checkpoint is part of it.
  *
  * Rollouts older than 7 days are compressed to .jsonl.zst by Codex; this adapter reads plain .jsonl only
  * and trim refuses a .zst source by name rather than reading compressed bytes as lines.
@@ -65,58 +72,66 @@ export function timestampOf(e) {
   return typeof e?.timestamp === 'string' ? e.timestamp : null;
 }
 
-// Never kept, never weighed: the stale-usage rows (P8).
+// Initial context: what Codex writes into a session's head and rebuilds on a resume when the file has none
+// (leg 3's probe). A response item counts by its own type and role, so the same rule reads rows and the items
+// inside a compacted row's replacement history. Every developer row seen in the sandbox's 16 rollouts was
+// context (base prompt, permissions, skills, tools, modes, plugins, incremental tool updates, a planted
+// checkpoint); the user rows here are the environment and AGENTS.md, which Codex re-injects per launch.
+// Bells ("[nightwatch bell, ...]") and the person's prompts are conversation and stay.
+const CONTEXT_USER = ['<environment_context>', '# AGENTS.md instructions for'];
+function isContextItem(it) {
+  if (!it || typeof it !== 'object') return false;
+  if (it.type === 'additional_tools') return true;
+  if (it.type !== 'message') return false;
+  if (it.role === 'developer' || it.role === 'system') return true;
+  if (it.role !== 'user') return false;
+  const first = Array.isArray(it.content) ? it.content[0]?.text : undefined;
+  return typeof first === 'string' && CONTEXT_USER.some((p) => first.startsWith(p));
+}
+export function isContext(e) {
+  if (e === null || typeof e !== 'object') return false;
+  const k = kindOf(e);
+  if (k === 'world_state' || k === 'turn_context') return true;
+  return e.type === 'response_item' && isContextItem(e.payload);
+}
+
+// Never kept, never weighed: the stale-usage rows (P8) and the initial context (leg 3).
 export function drop(e) {
   if (e === null) return false;
   const k = kindOf(e);
-  return k === 'event_msg/token_count' || k === 'token_usage_record';
+  return k === 'event_msg/token_count' || k === 'token_usage_record' || isContext(e);
 }
 
-// Kept, never weighed, never sent: the header, per-turn settings and the UI's event copies. Codex builds the
-// model's input from response_item, compacted and world_state rows.
+// Kept, never weighed, never sent: the header and the UI's event copies. Codex builds the model's input from
+// response_item and compacted rows (turn_context and world_state are context, dropped above).
 export function inert(e) {
   if (e === null) return false;
   const k = kindOf(e);
-  return k === 'session_meta' || k === 'turn_context' || e.type === 'event_msg';
+  return k === 'session_meta' || e.type === 'event_msg';
 }
 
 export function isSeam(e) {
   return kindOf(e) === 'event_msg/task_started';
 }
 
-// The first turn's preamble: its rows after task_started and before its turn_context, minus UI events.
-function preamble(entries) {
-  const start = entries.findIndex((e) => isSeam(e));
-  if (start < 0) return [];
-  const out = [];
-  for (let i = start + 1; i < entries.length; i++) {
-    const k = kindOf(entries[i]);
-    if (k === 'turn_context' || isSeam(entries[i])) break;
-    if (entries[i] && entries[i].type !== 'event_msg' && !drop(entries[i])) out.push(i);
-  }
-  return out;
-}
-
 export function order(entries, cut) {
   const meta = entries.findIndex((e) => kindOf(e) === 'session_meta');
-  const head = meta >= 0 && meta < cut ? [meta] : [];
-  const firstTurn = entries.findIndex((e) => isSeam(e));
-  const pre = firstTurn >= 0 && cut > firstTurn ? preamble(entries).filter((i) => i < cut) : [];
-  const out = [...head, ...pre];
+  const out = meta >= 0 && meta < cut ? [meta] : [];
   for (let i = cut; i < entries.length; i++) out.push(i);
   return { order: out, movedIn: 0 };
 }
 
 export function keep(entries, lines, ord) {
   const kept = [];
-  const counts = { dropped: 0, ordinalsStripped: 0, tokenCountsDropped: 0, usageRecordsDropped: 0 };
+  const counts = { dropped: 0, ordinalsStripped: 0, tokenCountsDropped: 0, usageRecordsDropped: 0, contextDropped: 0, contextInCompacted: 0 };
   for (const i of ord) {
     const e0 = entries[i];
     if (e0 === null) continue;
     if (drop(e0)) {
       counts.dropped++;
       if (kindOf(e0) === 'event_msg/token_count') counts.tokenCountsDropped++;
-      else counts.usageRecordsDropped++;
+      else if (kindOf(e0) === 'token_usage_record') counts.usageRecordsDropped++;
+      else counts.contextDropped++;
       continue;
     }
     let e = e0;
@@ -132,6 +147,14 @@ export function keep(entries, lines, ord) {
       let touched = false;
       for (const k of ['history_mode', 'history_base', 'forked_from_id']) if (k in p) { delete p[k]; touched = true; }
       if (touched) { e = { ...e, payload: p }; changed = true; }
+    }
+    // Codex's own compaction carries a copy of the old head in its replacement history; it goes the same way.
+    const hist = kindOf(e) === 'compacted' ? e.payload?.replacement_history : null;
+    if (Array.isArray(hist) && hist.some(isContextItem)) {
+      const keptHist = hist.filter((it) => !isContextItem(it));
+      counts.contextInCompacted += hist.length - keptHist.length;
+      e = { ...e, payload: { ...e.payload, replacement_history: keptHist } };
+      changed = true;
     }
     kept.push({ line: changed ? JSON.stringify(e) : lines[i], entry: e });
   }
@@ -178,6 +201,11 @@ export function validate(keptLines) {
   const records = rows.filter((r) => kindOf(r) === 'token_usage_record').length;
   if (records) problems.push(`${records} token_usage_record row(s) kept (usage accounting does not travel)`);
   if (rows.some((r) => r && 'ordinal' in r)) problems.push('a kept row still carries an ordinal');
+  // A kept head means the woken session gets no new one, and with it no checkpoint (leg 3's probe).
+  const ctx = rows.filter(isContext);
+  if (ctx.length) problems.push(`${ctx.length} initial-context row(s) kept (${[...new Set(ctx.map(kindOf))].join(', ')}): the wake would show no checkpoint`);
+  const inHist = rows.reduce((n, r) => n + (kindOf(r) === 'compacted' && Array.isArray(r.payload?.replacement_history) ? r.payload.replacement_history.filter(isContextItem).length : 0), 0);
+  if (inHist) problems.push(`${inHist} initial-context item(s) kept inside a compacted row's replacement history: the wake would show no checkpoint`);
   const start = rows.findIndex((r) => isSeam(r) || kindOf(r) === 'compacted');
   if (start < 0) problems.push('no turn start (task_started) or compacted row in the tail');
   else {
@@ -231,6 +259,8 @@ export function report(f) {
     tokenCountsDropped: f.counts.tokenCountsDropped,
     usageRecordsDropped: f.counts.usageRecordsDropped,
     ordinalsStripped: f.counts.ordinalsStripped,
+    contextDropped: f.counts.contextDropped,
+    ...(f.counts.contextInCompacted ? { contextInCompacted: f.counts.contextInCompacted } : {}),
     ...(f.imagesStripped.count ? { imagesStripped: f.imagesStripped } : {}),
     cutAt: timestampOf(f.entries[f.cut]),
     cutPrompt: String(prompt?.payload?.content?.[0]?.text ?? '').slice(0, 120),

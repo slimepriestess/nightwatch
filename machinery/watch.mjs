@@ -72,6 +72,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { contextOfEntries, envWithConfig, loadConfig, loadConfigFrom, providerOf, windowForLane } from './config.mjs';
+import { codexHeadWitness, findRollout } from './codexlane.mjs';
 
 const CFG = loadConfig();
 const W = CFG.watch;
@@ -597,6 +598,59 @@ function headWitness({ wokenPath, sid, lane, tail, foldAt, source }) {
   return { status: 'measured', share, fresh, disc, ref: refKind, version: shape.version };
 }
 
+// Leg 3: a codex wake's head, witnessed from its own rollout (codexlane.mjs codexHeadWitness). The Claude path above
+// reads a Claude transcript, which a codex lane doesn't have, so without this a codex wake goes unwitnessed. A codex
+// wake resumes the fold's tail under its own id (probe P3), appending to the folded file: the rows past the fold's kept
+// count are the wake's. The check is exact (the head is one byte-identical developer part, and one head in the file),
+// so a miss is red: a lane that woke without its checkpoint is an unauthored morning, and it can't tell (§5's rider).
+const WITNESS_TEXT = {
+  missing: 'woke without its checkpoint: the head wake.sh built is not among its developer instructions',
+  doubled: 'woke with its head twice in the file (an old one kept): in leg 3\'s probe a session like this read none of its checkpoint',
+  unwitnessed: 'woke with no head saved for this wake, so nothing can say what it was given',
+};
+function codexWitnessCheck(now) {
+  let rows = [];
+  try { rows = readFileSync(P.folds, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return; }
+  state.codexWitnessed ??= {};
+  for (const row of rows) {
+    if (row.provider !== 'codex' || !row.tail || state.codexWitnessed[row.tail]) continue;
+    const foldAt = Date.parse(row.at);
+    if (!(now - foldAt < COST_LOOKBACK_MS)) continue;
+    // The registry names the woken session: register-lane.sh writes lane.<id> from Codex's SessionStart (leg 2).
+    let lane = null;
+    try { lane = JSON.parse(readFileSync(join(P.wakecycle, `lane.${row.tail}`), 'utf8')).lane ?? null; } catch {}
+    const home = lane ? CFG.lanes?.[lane]?.codexHome : null;
+    if (!home) continue; // not woken yet, or not a lane this hub runs
+    const file = findRollout(home, row.tail);
+    if (!file || file.endsWith('.zst')) continue;
+    let rs = [];
+    try { rs = readFileSync(file, 'utf8').split('\n').filter((l) => l.trim()).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { continue; }
+    const appendedFrom = Number(row.keptEntries);
+    if (!Number.isFinite(appendedFrom) || rs.length <= appendedFrom) continue;
+    if (codexHeadWitness({ rows: rs, appendedFrom, head: '' }).status === 'pending') continue; // no finished turn yet
+    // The head wake.sh saved for this wake: written after the fold and before the launch.
+    const firstAt = Date.parse(rs[appendedFrom]?.timestamp);
+    let head = null;
+    try {
+      const kept = join(P.wakecycle, `last-head.${lane}`);
+      const mt = statSync(kept).mtimeMs;
+      if (mt >= foldAt && (!Number.isFinite(firstAt) || mt <= firstAt)) head = readFileSync(kept, 'utf8');
+    } catch {}
+    const w = head === null ? { status: 'unwitnessed' } : codexHeadWitness({ rows: rs, appendedFrom, head });
+    state.codexWitnessed[row.tail] = w.status;
+    const at = rs[appendedFrom]?.timestamp ?? new Date(now).toISOString();
+    if (w.status === 'ok') {
+      log(`codex wake head witnessed for ${lane} (${row.tail.slice(0, 8)}…): the checkpoint is one developer part of one head`);
+      continue;
+    }
+    emit({ at, kind: 'head-not-in-prompt', lane, session: row.tail, reason: w.status, seen: w.seen ?? null, tools: w.tools ?? null, fullStates: w.fullStates ?? null, alarm: true });
+    log(`HEAD NOT IN PROMPT: ${lane} (${row.tail.slice(0, 8)}…) ${WITNESS_TEXT[w.status]}`);
+    notify({ kind: 'head-not-in-prompt', cause: w.status, lane, session: row.tail, title: 'Woke without its checkpoint', text: `${cap(agentLabel(lane))} ${WITNESS_TEXT[w.status]}. Fold it again (Fold now) once it's quiet, or tell it what it missed.` });
+  }
+  const keep = Object.keys(state.codexWitnessed);
+  if (keep.length > 200) for (const k of keep.slice(0, keep.length - 200)) delete state.codexWitnessed[k];
+}
+
 function wakeCostCheck(now) {
   let rows = [];
   try { rows = readFileSync(P.folds, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean); } catch { return; }
@@ -793,6 +847,7 @@ function check() {
   for (const sid of Object.keys(state.due.seg)) if (!liveSids.has(sid)) delete state.due.seg[sid];
   try { l3DueCheck(now); } catch (e) { log(`l3-due check failed: ${e.message}`); }
   try { wakeCostCheck(now); } catch (e) { log(`wake-cost check failed: ${e.message}`); }
+  try { codexWitnessCheck(now); } catch (e) { log(`codex witness check failed: ${e.message}`); }
   try { foldFailureCheck(); } catch (e) { log(`fold-failure check failed: ${e.message}`); }
   if (JSON.stringify(state) !== before) saveState();
 }

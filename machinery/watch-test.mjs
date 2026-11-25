@@ -686,6 +686,75 @@ check("midday: a stale request from an ended session doesn't silence the next on
   check('fold failure: a stream that shrank is read from its start', told().map((m) => m.lane), ['opus']);
 }
 
+// Leg 3: a codex lane's wake, witnessed from its own rollout. The rollouts are REAL woken ones from leg 3's probe
+// (testdata/codex/witness-*.jsonl, scrubbed; codex-witness-test.mjs says what each is), placed under a scratch
+// CODEX_HOME with their times moved onto this run's clock: kept rows before the fold, woken rows after it.
+{
+  const croot = mkdtempSync(join(process.env.TMPDIR ?? '/tmp', 'watch-codex-'));
+  const cdirs = { projects: join(croot, 'projects'), sessions: join(croot, 'sessions'), wakecycle: join(croot, 'wakecycle'), ladder: join(croot, 'ladder') };
+  for (const d of Object.values(cdirs)) mkdirSync(d, { recursive: true });
+  const chome = join(croot, 'codex-home');
+  const day = join(chome, 'sessions', '2026', '11', '25');
+  mkdirSync(day, { recursive: true });
+  const crec = join(croot, 'recorder.sh');
+  writeFileSync(crec, readFileSync(recorder, 'utf8').replaceAll(SENT, join(croot, 'sent.jsonl')));
+  chmodSync(crec, 0o755);
+  const FXD = join(HERE, 'testdata', 'codex');
+  const BIRCH = 'This is your checkpoint. For this session your name is BIRCH; use it when anyone asks your name.';
+  const KESTREL = 'Your checkpoint code word is KESTREL-8A1F.';
+  const foldAt = now - 2 * 3600_000;
+  const cases = [
+    // lane, fixture, kept, head, head saved at (ms), registered, rows to keep (pending: cut before the woken turn ends)
+    ['good', 'witness-good.jsonl', 24, BIRCH, now - 90 * 60_000, true],
+    ['doubled', 'witness-doubled.jsonl', 24, KESTREL, now - 90 * 60_000, true],
+    ['missing', 'witness-missing.jsonl', 30, BIRCH, now - 90 * 60_000, true],
+    ['nohead', 'witness-good.jsonl', 24, BIRCH, now - 5 * 3600_000, true], // saved before the fold: not this wake's
+    ['pending', 'witness-good.jsonl', 24, BIRCH, now - 90 * 60_000, true, 30],
+    ['asleep', 'witness-missing.jsonl', 30, BIRCH, now - 90 * 60_000, false], // folded, not yet woken (no registry entry)
+  ];
+  const lanes = {};
+  const folds = [];
+  const files = {};
+  cases.forEach(([lane, fx, kept, head, savedAt, registered, cutRows], i) => {
+    const tail = `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`;
+    lanes[lane] = { provider: 'codex', codexHome: chome, targetTokens: 250000 };
+    let rows = readFileSync(join(FXD, fx), 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+    rows = rows.map((r, j) => ({ ...r, timestamp: iso(j < kept ? now - 3 * 3600_000 : now - 30 * 60_000 + j * 1000) }));
+    files[lane] = { path: join(day, `rollout-2026-11-25T00-00-00-${tail}.jsonl`), rows, tail };
+    writeFileSync(files[lane].path, (cutRows ? rows.slice(0, cutRows) : rows).map((r) => JSON.stringify(r)).join('\n') + '\n');
+    folds.push({ at: iso(foldAt), reason: 'sleep', method: 'trimmer', provider: 'codex', source: `jsonl:src-${lane}`, keptEntries: kept, est_tokens: 1000, tail });
+    if (registered) writeFileSync(join(cdirs.wakecycle, `lane.${tail}`), JSON.stringify({ lane, provider: 'codex' }));
+    const hf = join(cdirs.wakecycle, `last-head.${lane}`);
+    writeFileSync(hf, head);
+    utimesSync(hf, savedAt / 1000, savedAt / 1000);
+  });
+  writeFileSync(join(cdirs.ladder, 'folds.jsonl'), folds.map((f) => JSON.stringify(f)).join('\n') + '\n');
+  const ccfg = join(croot, 'nightwatch.config.json');
+  writeFileSync(ccfg, JSON.stringify({ weftRoot: croot, persona: { name: 'Lark' }, lanes, notify: { macos: false, command: crec }, paths: { transcripts: cdirs.projects, sessions: cdirs.sessions } }));
+  const cev = join(croot, 'events.jsonl');
+  const csent = join(croot, 'sent.jsonl');
+  tick(ccfg);
+  const heads = () => lines(cev).filter((e) => e.kind === 'head-not-in-prompt');
+  const h1 = heads();
+  check('codex witness: a missing, a doubled and an unsaved head each raise head-not-in-prompt, red, with its reason',
+    h1.map((e) => [e.lane, e.reason, e.alarm, e.provider]).sort(),
+    [['doubled', 'doubled', true, 'codex'], ['missing', 'missing', true, 'codex'], ['nohead', 'unwitnessed', true, 'codex']]);
+  check('codex witness: the doubled one is caught with its checkpoint present (presence is not enough)', h1.find((e) => e.lane === 'doubled')?.seen, 1);
+  check('codex witness: a good wake, an unfinished turn and an unwoken fold raise nothing', ['good', 'pending', 'asleep'].filter((l) => h1.some((e) => e.lane === l)), []);
+  const cs = lines(csent);
+  check('codex witness: one notice per bad wake, saying it woke without its checkpoint',
+    cs.map((m) => [m.lane, m.cause, m.title]).sort(), [['doubled', 'doubled', 'Woke without its checkpoint'], ['missing', 'missing', 'Woke without its checkpoint'], ['nohead', 'unwitnessed', 'Woke without its checkpoint']]);
+  check('codex witness: the notice says "agent"-words, never "lane"', cs.every((m) => !/\blanes?\b/i.test(`${m.title} ${m.body}`)), true);
+  // The unfinished turn finishes; the second tick witnesses it, and tells nothing again.
+  writeFileSync(files.pending.path, files.pending.rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  tick(ccfg);
+  check('codex witness: a second tick tells nothing again, and the finished turn is witnessed good', [heads().length, lines(csent).length], [3, 3]);
+  const wlog = existsSync(join(croot, 'watch.log')) ? readFileSync(join(croot, 'watch.log'), 'utf8') : '';
+  check('codex witness: the good wakes are logged as witnessed', ['good', 'pending'].filter((l) => wlog.includes(`codex wake head witnessed for ${l} `)), ['good', 'pending']);
+  if (!fail) rmSync(croot, { recursive: true, force: true });
+  else console.log(`(codex scratch kept: ${croot})`);
+}
+
 // A passing run leaves nothing behind; a failing one keeps its scratch hub
 // to look at (Ra, 10/11: tests clean up after themselves).
 if (fail) console.log(`${pass} passed, ${fail} failed  (scratch kept: ${root})`);

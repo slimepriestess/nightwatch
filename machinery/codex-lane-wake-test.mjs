@@ -39,50 +39,71 @@ function wake(root, env = {}) {
   for (const k of ['NIGHTWATCH_CONFIG', 'NIGHTWATCH_LANE', 'WEFT_LANE', 'NIGHTWATCH_NODE', 'CODEX_HOME']) if (!(k in env)) delete e[k];
   return spawnSync('sh', [join(MACHINERY, 'wake.sh'), 'main'], { env: e, encoding: 'utf8', timeout: 30000 });
 }
-const HATCH = { NIGHTWATCH_CODEX_WAKE_WITHOUT_CHECKPOINT: '1' };
+const HATCH = {}; // leg 2's test hatch is gone with leg 3's refusal; the cases below keep their shape
 const argv = (root) => readFileSync(join(root, 'codex.argv'), 'utf8').trim().split('\n');
+// the argv with its developer_instructions value set aside, and that value decoded (it is a JSON string: one argv line)
+const split = (root) => {
+  const a = argv(root); const i = a.indexOf('-c');
+  if (i < 0 || !a[i + 1]?.startsWith('developer_instructions=')) return { rest: a, dev: null };
+  return { rest: [...a.slice(0, i), ...a.slice(i + 2)], dev: JSON.parse(a[i + 1].slice('developer_instructions='.length)) };
+};
 const log = (root) => { try { return readFileSync(join(root, 'nightshift.log'), 'utf8'); } catch { return ''; } };
 const roots = [];
 const mk = (o) => { const r = hub(o); roots.push(r); return r; };
 const procs = [];
 
 try {
-  check('a codex lane is refused until leg 3 can carry its checkpoint (exit 7, logged, nothing launched)', () => {
+  check('leg 3 lifted the refusal: a codex lane wakes with no hatch, its checkpoint in its developer instructions', () => {
     const r = mk();
     const res = wake(r);
-    assert.equal(res.status, 7, res.stdout + res.stderr);
-    assert.match(log(r), /WAKE REFUSED for main: a codex lane can't yet carry its checkpoint/);
-    assert.equal(existsSync(join(r, 'codex.argv')), false);
-    assert.equal(existsSync(join(r, 'claude-ran')), false);
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.doesNotMatch(log(r), /WAKE REFUSED/);
+    assert.equal(split(r).dev, readFileSync(join(r, 'wakecycle', 'last-head.main'), 'utf8'));
   });
-  check('a codex lane with no codexHome is refused, even through the test hatch', () => {
+  check('a codex lane with no codexHome is refused', () => {
     const r = mk({ lane: { codexHome: undefined } });
     const res = wake(r, HATCH);
     assert.equal(res.status, 7, res.stdout + res.stderr);
     assert.match(log(r), /a codex lane with no lanes\.main\.codexHome/);
     assert.equal(existsSync(join(r, 'codex.argv')), false);
   });
-  check('through the hatch, the wake runs `codex resume <tail>` in the lane\'s CODEX_HOME, never claude', () => {
+  check('the wake runs `codex resume <tail>` in the lane\'s CODEX_HOME, never claude', () => {
     const r = mk();
     const res = wake(r, HATCH);
     assert.equal(res.status, 0, res.stdout + res.stderr);
-    assert.deepEqual(argv(r), ['resume', SID, '--no-daemon']);
+    const { rest, dev } = split(r);
+    assert.deepEqual(rest, ['resume', SID, '--no-daemon']);
+    // the head reaches codex as developer instructions, byte for byte the head wake.sh saved for the witness
+    assert.equal(dev, readFileSync(join(r, 'wakecycle', 'last-head.main'), 'utf8'));
+    assert.match(dev, /^# checkpoint\n/);
+    assert.match(dev, /Your bells arrive as messages in this session marked "\[nightwatch bell, sent by the machinery\]"/);
+    assert.doesNotMatch(dev, /bell-watcher|inbox watcher/, 'a codex session has no watcher to arm');
     assert.equal(readFileSync(join(r, 'codex.home'), 'utf8'), join(r, 'codex-home'));
     assert.equal(existsSync(join(r, 'claude-ran')), false);
-    assert.match(log(r), /this codex wake carries NO checkpoint/);
     assert.match(log(r), /wake receipt: main lane reached exec/);
   });
   check('the pinned model and the wake prompt ride the codex command line, prompt last', () => {
     const r = mk({ lane: { model: 'gpt-test', wakePrompt: '[nightwatch] the morning wake: read the receipts.' } });
     const res = wake(r, HATCH);
     assert.equal(res.status, 0, res.stdout + res.stderr);
-    assert.deepEqual(argv(r), ['resume', SID, '--no-daemon', '-m', 'gpt-test', '[nightwatch] the morning wake: read the receipts.']);
+    assert.deepEqual(split(r).rest, ['resume', SID, '--no-daemon', '-m', 'gpt-test', '[nightwatch] the morning wake: read the receipts.']);
+  });
+  check('a head that can\'t be read into developer instructions refuses the wake (exit 7, logged, nothing launched)', () => {
+    const r = mk();
+    // a node that fails only for wake.sh's head-quoting call, and runs every other call (config reads) as usual
+    const wrap = join(r, 'bin', 'node-nohead');
+    writeFileSync(wrap, `#!/bin/sh\ncase "$*" in *JSON.stringify*) exit 1 ;; esac\nexec "${process.execPath}" "$@"\n`); chmodSync(wrap, 0o755);
+    const res = wake(r, { ...HATCH, NIGHTWATCH_NODE: wrap });
+    assert.equal(res.status, 7, res.stdout + res.stderr);
+    assert.match(log(r), /couldn't put the head into developer instructions/);
+    assert.equal(existsSync(join(r, 'codex.argv')), false);
   });
   check('a first wake starts a fresh codex session (no resume)', () => {
     const r = mk({ receipt: { firstWake: true }, lane: { model: 'gpt-test' } });
     const res = wake(r, HATCH);
     assert.equal(res.status, 0, res.stdout + res.stderr);
-    assert.deepEqual(argv(r), ['--no-daemon', '-m', 'gpt-test']);
+    assert.deepEqual(split(r).rest, ['--no-daemon', '-m', 'gpt-test']);
+    assert.ok(split(r).dev?.includes('## Standing wake duties'), 'a first wake carries the head too');
   });
   check('a codexHome written as ~/… is expanded to the home folder', () => {
     const r = mk({ lane: { codexHome: '~/.nightwatch-test-codex-home' } });

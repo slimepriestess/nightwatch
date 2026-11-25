@@ -37,7 +37,9 @@ check('the fixture is the shape P1 recorded (a literal list, so fixture drift sh
   assert.equal(TWO.every((l) => 'ordinal' in JSON.parse(l)), true);
 });
 
-check('a whole-session fold: legacy header, no ordinals, no token_count or usage record, everything else kept', () => {
+// Initial context (leg 3): the rows Codex rebuilds as a session's head on a resume, and only when the file has none.
+const CONTEXT_ROWS = [2, 3, 4, 5, 6, 7, 8, 9, 20, 21, 22]; // additional_tools, 4 developer, environment, world_state x2, turn_context x2, the later developer row
+check('a whole-session fold: legacy header, no ordinals, no token_count or usage record, no initial context, the conversation kept', () => {
   const r = fold(TWO, 250_000);
   assert.equal(r.refused, undefined, r.refused?.message);
   const k = r.keptLines.map(kind);
@@ -47,35 +49,45 @@ check('a whole-session fold: legacy header, no ordinals, no token_count or usage
   assert.equal(r.keptLines.some((l) => 'ordinal' in JSON.parse(l)), false);
   assert.equal(k.includes('event_msg/token_count'), false);
   assert.equal(k.includes('token_usage_record'), false);
-  assert.equal(r.keptLines.length, TWO.length - 4);
+  for (const c of ['response_item/additional_tools', 'world_state', 'turn_context']) assert.equal(k.includes(c), false, c);
+  const roles = r.keptLines.filter((l) => kind(l) === 'response_item/message').map((l) => JSON.parse(l).payload.role);
+  assert.deepEqual(roles, ['user', 'assistant', 'user', 'assistant']);
+  assert.equal(r.keptLines.length, TWO.length - 4 - CONTEXT_ROWS.length);
   assert.equal(r.facts.counts.tokenCountsDropped, 2);
   assert.equal(r.facts.counts.usageRecordsDropped, 2);
+  assert.equal(r.facts.counts.contextDropped, CONTEXT_ROWS.length);
   assert.equal(r.keptLines.join('\n').includes('HERON-19D577'), true);
+  assert.equal(r.keptLines.join('\n').includes('<environment_context>'), false);
 });
 
-check('a cut at the second turn keeps the header and the first turn\'s preamble, then the turn', () => {
+check('the context rows are exactly the ones the probe stripped (a literal list, so a widened or narrowed rule shows here)', () => {
+  assert.deepEqual(TWO.map((l, i) => (codex.isContext(codex.parse(l)) ? i : -1)).filter((i) => i >= 0), CONTEXT_ROWS);
+});
+
+check('a cut at the second turn keeps the header and that turn\'s conversation only: no first-turn rows at all', () => {
   const r = fold(TWO, 500);
   assert.equal(r.refused, undefined, r.refused?.message);
   assert.equal(r.facts.cut, 19);
   assert.deepEqual(r.keptLines.map(kind), [
     'session_meta',
-    'response_item/additional_tools', 'response_item/message', 'response_item/message', 'response_item/message',
-    'response_item/message', 'response_item/message', 'world_state',
-    'event_msg/task_started', 'response_item/message', 'world_state', 'turn_context', 'response_item/message',
+    'event_msg/task_started', 'response_item/message',
     'event_msg/item_completed', 'event_msg/item_completed', 'response_item/message', 'event_msg/task_complete',
   ]);
   const text = r.keptLines.join('\n');
   assert.equal(text.includes('HERON-19D577'), false, 'the first turn\'s prompt is cut');
   assert.equal(text.includes('Reply with just: resumed.'), true);
-  assert.equal(r.keptLines.filter((l) => kind(l) === 'session_meta').length, 1);
+  // The header keeps base_instructions (Codex's source for the base prompt on resume); no row after it carries one.
+  assert.equal(r.keptLines.slice(1).join('\n').includes('You are Codex'), false, 'no base-prompt message travels');
 });
 
-check('the kept preamble carries no UI event rows (an event inside the first turn\'s preamble stays behind)', () => {
-  const ev = JSON.stringify({ timestamp: 't', type: 'event_msg', payload: { type: 'thread_settings_applied', marker: 'PREAMBLE-EVENT' } });
-  const withEvent = [...TWO.slice(0, 3), ev, ...TWO.slice(3)];
-  const r = fold(withEvent, 500);
+check('a bell and the person\'s prompts are conversation: a bell row survives the fold', () => {
+  const bell = JSON.stringify({ timestamp: 't', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '[nightwatch bell, sent by the machinery] fold at your next seam' }] } });
+  const agents = JSON.stringify({ timestamp: 't', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '# AGENTS.md instructions for /x\n<INSTRUCTIONS>' }] } });
+  const r = fold([...TWO.slice(0, 23), bell, agents, ...TWO.slice(23)], 250_000);
   assert.equal(r.refused, undefined, r.refused?.message);
-  assert.equal(r.keptLines.join('\n').includes('PREAMBLE-EVENT'), false);
+  const text = r.keptLines.join('\n');
+  assert.equal(text.includes('[nightwatch bell, sent by the machinery]'), true);
+  assert.equal(text.includes('# AGENTS.md instructions'), false, 'AGENTS.md is re-read per launch (P4)');
 });
 
 check('a cut never opens mid-turn: every seam is a task_started', () => {
@@ -83,11 +95,15 @@ check('a cut never opens mid-turn: every seam is a task_started', () => {
   assert.deepEqual(seams, [1, 19]);
 });
 
-check('a rollout with Codex\'s own compacted row folds, the compacted row kept', () => {
+check('a rollout with Codex\'s own compacted row folds, the compacted row kept and its copy of the old head emptied', () => {
   const r = fold(lines('compacted.jsonl'), 250_000);
   assert.equal(r.refused, undefined, r.refused?.message);
   assert.equal(r.keptLines.map(kind).includes('compacted'), true);
   assert.equal(r.keptLines.map(kind).includes('event_msg/token_count'), false);
+  const hist = JSON.parse(r.keptLines.find((l) => kind(l) === 'compacted')).payload.replacement_history;
+  assert.deepEqual(hist.map((it) => `${it.type}/${it.role ?? '-'}`), ['message/user', 'compaction/-']);
+  assert.match(hist[0].content[0].text, /HERON-19D577/);
+  assert.equal(r.facts.counts.contextInCompacted, 6);
 });
 
 const good = fold(TWO, 250_000).keptLines;
@@ -105,6 +121,10 @@ check('validate passes the folded tail and refuses each thing P6/P8 showed a wak
   assert.match(codex.validate(good.slice(1)).join(';'), /session_meta/);
   assert.match(codex.validate([good[0], ...good]).join(';'), /more than one/);
   assert.match(codex.validate(['not json', ...good]).join(';'), /parse/);
+  // initial context, each kind on its own, refused by name
+  for (const i of CONTEXT_ROWS) assert.match(codex.validate([...good, TWO[i]]).join(';'), /initial-context row/, `row ${i}`);
+  const cmp = lines('compacted.jsonl').find((l) => kind(l) === 'compacted');
+  assert.match(codex.validate([...good, cmp]).join(';'), /inside a compacted row/);
   const noTurn = good.filter((l) => kind(l) !== 'event_msg/task_started');
   assert.match(codex.validate(noTurn).join(';'), /no turn start/);
   const asst = good.find((l) => kind(l) === 'response_item/message' && JSON.parse(l).payload.role === 'assistant');
