@@ -1136,6 +1136,7 @@ async function rehearse() {
       wakeConfirmed: (lane, sinceMs) => w.sessions.find((s) => s.lane === lane && (s.bornAt ?? -1) > sinceMs)?.sessionId ?? false,
       nextWakeSession: (lane) => `rehearse-${lane}-tail`,
       lastEntryIsApiError: (sid) => !!w.apiErrorTails?.[sid],
+      quietUnknown: (sid) => !!w.quietUnknown?.[sid],   // a codex session whose rollout can't be found (leg 2b)
       cannotAnswer: (sid) => !!w.deadWakes?.[sid],
       busyChildren: () => w.busy ?? [],
       killAndWait: (pid) => { w.sessions = w.sessions.filter((s) => s.pid !== pid); return true; },
@@ -1827,6 +1828,27 @@ async function rehearse() {
     // (A 'never names another house' negative was dropped: under Weft's
     // sealed layout MACHINERY_DIR legitimately IS weft/wakecycle, so the
     // positive exact-path check above is the honest form of the claim.)
+  }
+
+  { // A codex session whose quiet can't be read (leg 2b; Sonnet's #89 re-check): the alarm is said ONCE per bell and once
+    // per refresh session, never every tick (the 10/27 alert storm's shape), and nothing is closed or folded meanwhile.
+    const w = makeWorld(['lark']);
+    w.sessions = [{ pid: 1, sessionId: 'sess-cx', lane: 'lark', quietMs: 0 }];
+    w.quietUnknown = { 'sess-cx': true };
+    w.step(7 * 60 + 2 + 45 + 60); // 19:00 -> past 02:00, the 45-minute grace, and an hour of ticks beyond it
+    const said = () => w.logs.filter((l) => l.startsWith('QUIET UNKNOWN: lark')).length;
+    check('quiet-unknown', 'the bell rang for the codex session', count(w, 'bell:lark') === 1, w.events.join());
+    check('quiet-unknown', 'said once, though an hour of ticks passed the grace', said() === 1, String(said()));
+    check('quiet-unknown', 'never closed or orphan-folded while it can\'t be read', count(w, 'close:') === 0 && count(w, 'orphanfold') === 0, w.events.join());
+    const r = makeWorld(['lark']);
+    r.armed = [];
+    r.sessions = [{ pid: 2, sessionId: 'sess-cx2', lane: 'lark', quietMs: 0 }];
+    r.quietUnknown = { 'sess-cx2': true };
+    r.nextWake.lark = r.io.now() - 60_000;
+    r.st.lark = { refreshWake: true, refreshFrom: 'sess-cx2' };
+    r.step(30);
+    const saidR = r.logs.filter((l) => l.startsWith('QUIET UNKNOWN: lark') && /refresh/.test(l)).length;
+    check('quiet-unknown', 'a refresh from it: said once in thirty ticks, the old session left up', saidR === 1 && count(r, 'close:') === 0, `${saidR} ${r.events.join()}`);
   }
   console.log(failures === 0 ? 'REHEARSAL CLEAN' : `REHEARSAL: ${failures} failure(s)`);
   if (failures) process.exitCode = 1;

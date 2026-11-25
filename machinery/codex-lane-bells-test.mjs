@@ -112,7 +112,7 @@ try {
   // ---------------- the real nightshift, on a scratch hub ----------------
   const pad = (n) => String(n).padStart(2, '0');
   const hm = (offsetMin) => { const t = new Date(Date.now() + offsetMin * 60_000); return `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`; };
-  function hub({ codexHome = true, state = null, nextWakeAgeMs = null, graceMs = 0, claudeTranscript = null, armed = true } = {}) {
+  function hub({ codexHome = true, state = null, nextWakeAgeMs = null, graceMs = 0, claudeTranscript = null, armed = true, provider = 'codex' } = {}) {
     const root = scratch('hub');
     for (const d of ['wakecycle', 'ladder', 'projects', 'codex-home', 'bin', 'spool']) mkdirSync(join(root, d), { recursive: true });
     const stub = join(root, 'bin', 'codex-stub');
@@ -121,7 +121,7 @@ try {
       weftRoot: root, defaultLane: 'lark', timezone: 'UTC',
       // the sleep window holds now, and the wake is hours off (the orphan floor never runs in the last pre-wake hour)
       schedule: { sleep: hm(-60), wake: hm(240), quietMs: 60_000, orphanQuietMs: 60_000, orphanGraceMs: graceMs },
-      lanes: { lark: { targetTokens: 250000, provider: 'codex', ...(codexHome ? { codexHome: join(root, 'codex-home') } : {}) } },
+      lanes: { lark: { targetTokens: 250000, provider, ...(codexHome ? { codexHome: join(root, 'codex-home') } : {}) } },
       notify: { macos: false },
       paths: { workdir: root, transcripts: join(root, 'projects'), codexBin: stub, spool: join(root, 'spool') },
     };
@@ -240,6 +240,13 @@ try {
     const r = nightshift(h, '--preflight');
     assert.equal(r.status, 0, r.stdout + r.stderr);
     assert.match(r.stdout, /\[decision\] QUIET UNKNOWN: lark codex session 019a0000.*the refresh can't close it/);
+  });
+  await check('a Claude Code lane belled past the grace: the unknown-quiet check passes over it without throwing (the `!!cx` guard)', () => {
+    const h = hub({ provider: 'claude-code', codexHome: false, state: { belledAt: Date.now() - 30 * 60_000, belledSession: 'claude-session' }, nextWakeAgeMs: 2 * 3600_000 });
+    const r = nightshift(h, '--preflight');
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.doesNotMatch(r.stdout, /QUIET UNKNOWN/);
+    assert.match(r.stdout, /preflight complete/);
   });
 } finally {
   for (const p of procs) { try { p.kill(); } catch {} }
