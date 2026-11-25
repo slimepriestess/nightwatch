@@ -339,7 +339,8 @@ anyone else:
 }
 ```
 
-What Add agent does for a Codex lane (and what to expect):
+What Add agent does for a Codex lane — today that means the spec-file
+path, since the app form's provider picker is still the named not-yet:
 
 - makes the lane its own `CODEX_HOME` — its sessions, its sign-in, its
   hooks live there, never in your personal `~/.codex`;

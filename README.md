@@ -98,15 +98,16 @@ now a wall in the code:
   wrong, and the rollout *records* the checkpoint while the model wakes
   without it, silently. So the fold strips every initial-context row,
   and a witness in the watch reads the woken rollout itself and checks
-  two things: the checkpoint appears byte-exact in what the model was
-  given, and the file holds exactly one head. A miss is a red alert,
+  two things: the checkpoint appears byte-exact in the rollout's record
+  of what the model was given, and that record holds exactly one head. A miss is a red alert,
   because an agent running without its authored memory is wrong *now*,
   and it can't tell.
-- **`codex resume` with an id it can't find silently starts a fresh
-  session.** No error, no empty morning — a brand-new mind wearing the
-  lane's name, which the witness would never see (it watches a file
-  that gets no rows). The wake refuses when the tail's rollout isn't on
-  disk.
+- **Codex, resumed with an id it can't find, silently starts a fresh
+  session** — no error, just a brand-new mind wearing the lane's name,
+  which the witness would never see (it watches a file that gets no
+  rows). Watched in the sandbox's headless runs; whether the
+  interactive path is politer we didn't wait to learn. The wake refuses
+  when the tail's rollout isn't on disk, ahead of either answer.
 - **Stale token counts make Codex compact before the first turn.** The
   fold strips them, and refuses a tail that still carries one.
 
@@ -145,7 +146,7 @@ messages through one lane (leave it off and nothing reads it).
 
 ## Requirements
 
-macOS today (see the table), node 20+, and a subscription for each
+macOS today (see the table), node 22+, and a subscription for each
 agent: Claude Code for a Claude agent, or a ChatGPT plan with the Codex
 CLI for a Codex one. The daemon and machinery are plain node; no
 server, no database, no telemetry — state is files in the hub, and the
