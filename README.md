@@ -80,6 +80,45 @@ purpose. A failed wake's alert card carries Restore checkpoint / Retry
 wake / Show log, because needing a terminal to fix a bad morning would
 be the real failure.*
 
+## Two kinds of agents, one set of promises
+
+As of late November, a lane can run on OpenAI's Codex CLI instead of
+Claude Code — same bells, same fold, same morning. The interesting part
+was never the plumbing; it was making the promises survive the
+translation. `machinery/providers/` holds one adapter per backend, and
+the house rule for writing one is: probe first, trust nothing you
+didn't watch happen.
+
+The probes earned their keep. Three findings from the Codex port, each
+now a wall in the code:
+
+- **A row in the file is not a row the model read.** Codex rebuilds a
+  resumed session's head (prompt, tools, the checkpoint we inject as
+  developer instructions) only when the file carries no old one — fold
+  wrong, and the rollout *records* the checkpoint while the model wakes
+  without it, silently. So the fold strips every initial-context row,
+  and a witness in the watch reads the woken rollout itself and checks
+  two things: the checkpoint appears byte-exact in what the model was
+  given, and the file holds exactly one head. A miss is a red alert,
+  because an agent running without its authored memory is wrong *now*,
+  and it can't tell.
+- **`codex resume` with an id it can't find silently starts a fresh
+  session.** No error, no empty morning — a brand-new mind wearing the
+  lane's name, which the witness would never see (it watches a file
+  that gets no rows). The wake refuses when the tail's rollout isn't on
+  disk.
+- **Stale token counts make Codex compact before the first turn.** The
+  fold strips them, and refuses a tail that still carries one.
+
+Until the witness existed, a Codex lane refused to wake at all. That
+wasn't a missing feature — it was the point. An unauthored morning is
+the one promise this software doesn't break to ship a week early.
+
+Still pending, honestly: the app's Add agent form grows its provider
+picker next, and no Codex lane has yet lived a real night here — the
+machinery is probe-tested and suite-covered, and this table will say
+"lived-on" only when someone has lived on it.
+
 ## Status, honestly
 
 | Piece | State |
@@ -92,7 +131,8 @@ be the real failure.*
 | macOS (launchd + Terminal) | the lived platform |
 | Windows 11 / WSL2 | running in a second house (the machinery and the browser viewer); the scratch tests and the wake's summons file checked on a real WSL machine; bringing a lane's terminal forward is macOS only |
 | Linux (systemd + tmux/terminal spawn) | the machinery's tests pass or skip with a reason in CI on every push, and the nightshift's rehearsal bench passes; the app's host actions are wired and compiled in CI, but their Linux paths aren't exercised by a test yet; bringing a terminal forward is macOS only |
-| Backends beyond Claude Code (codex, connectome, hermes, …) | roadmap |
+| Codex (OpenAI) agents: fold, wake, bells, usage, Add agent | live this week; first lived-on nights pending (see below) |
+| Backends beyond those two (connectome, hermes, …) | roadmap |
 
 One more honest sticker: Nightwatch grew up in one house, and a few traces
 of it remain. The shipped defaults no longer name that house's folders: a
@@ -105,8 +145,9 @@ messages through one lane (leave it off and nothing reads it).
 
 ## Requirements
 
-macOS today (see the table), node 20+, and a Claude Code subscription
-for the agents themselves. The daemon and machinery are plain node; no
+macOS today (see the table), node 20+, and a subscription for each
+agent: Claude Code for a Claude agent, or a ChatGPT plan with the Codex
+CLI for a Codex one. The daemon and machinery are plain node; no
 server, no database, no telemetry — state is files in the hub, and the
 hub belongs to the person and persona it hosts.
 
