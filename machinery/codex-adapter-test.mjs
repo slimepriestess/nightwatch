@@ -90,6 +90,20 @@ check('a bell and the person\'s prompts are conversation: a bell row survives th
   assert.equal(text.includes('# AGENTS.md instructions'), false, 'AGENTS.md is re-read per launch (P4)');
 });
 
+check('a compacted row whose history is ALL context folds to an empty history, and validate passes it', () => {
+  // Selvage's note on #90. RAN in the sandbox (11/25): a file shaped like this, folded, resumed cleanly with one head,
+  // read its new checkpoint, and still answered the history word from the turns after the compaction.
+  const ls = lines('compacted.jsonl').map((l) => {
+    const e = JSON.parse(l);
+    if (e.type !== 'compacted') return l;
+    return JSON.stringify({ ...e, payload: { ...e.payload, replacement_history: e.payload.replacement_history.filter((it) => codex.isContext({ type: 'response_item', payload: it })) } });
+  });
+  const r = fold(ls, 250_000);
+  assert.equal(r.refused, undefined, r.refused?.message);
+  assert.deepEqual(JSON.parse(r.keptLines.find((l) => kind(l) === 'compacted')).payload.replacement_history, []);
+  assert.deepEqual(codex.validate(r.keptLines), []);
+});
+
 check('a cut never opens mid-turn: every seam is a task_started', () => {
   const seams = TWO.map((l, i) => (codex.isSeam(codex.parse(l)) ? i : -1)).filter((i) => i >= 0);
   assert.deepEqual(seams, [1, 19]);
