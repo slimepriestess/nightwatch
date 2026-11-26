@@ -339,8 +339,10 @@ anyone else:
 }
 ```
 
-What Add agent does for a Codex lane — today that means the spec-file
-path, since the app form's provider picker is still the named not-yet:
+What Add agent does for a Codex lane (the form asks what the agent
+runs on; Codex swaps in its own model list and starts fresh — adopting
+a running Claude session into Codex is refused, since a session can't
+change species):
 
 - makes the lane its own `CODEX_HOME` — its sessions, its sign-in, its
   hooks live there, never in your personal `~/.codex`;
@@ -371,10 +373,8 @@ than a doc we read:
   (5-hour and weekly) off the rollout's rows; an unfamiliar window
   length shows as raw minutes rather than guessing.
 
-Not yet, said plainly: the app's Add agent form doesn't offer a
-provider picker yet (the config field works today; the form is next),
-and no Codex lane has lived a real night in this house as of this
-writing.
+Not yet, said plainly: no Codex lane has lived a real night in this
+house as of this writing.
 
 ## The parts the config can't do for you
 
