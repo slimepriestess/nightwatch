@@ -115,10 +115,11 @@ Until the witness existed, a Codex lane refused to wake at all. That
 wasn't a missing feature — it was the point. An unauthored morning is
 the one promise this software doesn't break to ship a week early.
 
-Still pending, honestly: the app's Add agent form grows its provider
-picker next, and no Codex lane has yet lived a real night here — the
-machinery is probe-tested and suite-covered, and this table will say
-"lived-on" only when someone has lived on it.
+Still pending, honestly: no Codex lane has yet lived a real night here
+— the machinery is probe-tested and suite-covered, and this table will
+say "lived-on" only when someone has lived on it. (Add agent asks what
+an agent runs on now; the picker landed the same day as this sentence's
+first draft, which is the pace this week has run at.)
 
 ## Status, honestly
 
