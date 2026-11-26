@@ -237,6 +237,11 @@ NEW_MODELS = [("claude-fable-5-1", "Fable 5.1"), ("claude-opus-5-5", "Opus 5.5")
               ("claude-sonnet-5-5", "Sonnet 5.5"), ("claude-haiku-4-5-20251001", "Haiku 4.5")]
 def model_opts():
     return "".join(f'<option value="{i}">{t}</option>' for i, t in NEW_MODELS)
+# A codex agent's models (codex lane leg 6's picker, 11/25): the top of the list codex-cli 0.171.0's own catalogue
+# shows on a ChatGPT plan (`codex debug models`), its default first.
+NEW_CODEX_MODELS = [("gpt-6.2-sol", "GPT-6.2-Sol"), ("gpt-6.2-astra", "GPT-6.2-Astra"), ("gpt-6.1-terra", "GPT-6.1 Terra")]
+def codex_model_opts():
+    return "".join(f'<option value="{i}">{t}</option>' for i, t in NEW_CODEX_MODELS)
 
 # The preview's steps, from the machinery's dry run (nightwatch.mjs plan):
 # the app shows exactly what apply will do (contract v0.10). The gallery
@@ -418,7 +423,9 @@ def add_slot(open_=False, step="form", steps=(), persona=None):
       <button type="button" data-action="add-lane" data-part="add" aria-expanded="{o}">{icon("plus")}<span>Add agent</span></button>
       <form data-part="add-form" aria-label="New agent">
         <label><span>Lane name</span><input type="text" data-field="id" placeholder="e.g. scout" autocomplete="off" spellcheck="false"></label>
-        <label><span>Model</span><select data-field="model">{model_opts()}</select></label>
+        <label><span>Runs on</span><select data-field="provider"><option value="claude-code">Claude Code</option><option value="codex">Codex</option></select></label>
+        <label data-part="model-claude"><span>Model</span><select data-field="model">{model_opts()}</select></label>
+        <label data-part="model-codex" hidden><span>Model</span><select data-field="codexModel">{codex_model_opts()}</select></label>
         <label data-part="global-schedule"><input type="checkbox" data-field="inherit" checked><span>Use global nightshift settings</span></label>
         <div data-part="own-schedule"><label>{icon("moon")} Sleep <input type="time" data-field="sleep" value="{esc(sc["sleep"])}" disabled></label>
           <label>{icon("sun")} Wake <input type="time" data-field="wake" value="{esc(sc["wake"])}" disabled></label></div>

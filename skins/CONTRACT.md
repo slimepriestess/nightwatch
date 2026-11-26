@@ -490,3 +490,14 @@ Written by: claude-opus-5-5, 2026-10-05 (v0.1–v0.4)
   label reads "Codex …" ("Codex 5-hour"), so the tips and meter names tell the two plans apart. Skins stack the two
   blocks (minimal: the free height below the last one only) and give the `openai` block `--meter: var(--nw-ink)`,
   not a state colour.
+
+## v0.18: Runs on, in Add agent (codex lane leg 6, 11/25)
+
+- **Form.** Add agent's form carries `select[data-field="provider"]` ("Claude Code" = `claude-code`, "Codex" =
+  `codex`; short enough for the narrowest card) after the name, and two model rows: `label[data-part="model-claude"]` holding
+  `select[data-field="model"]`, and `label[data-part="model-codex"][hidden]` holding `select[data-field="codexModel"]`
+  (the top of codex-cli's own catalogue on a ChatGPT plan, its default first). The runtime shows the row that matches
+  the provider, and for Codex it sets "Start from" back to a fresh session and disables adopting (a codex agent starts
+  fresh). Skins need nothing new: both rows are ordinary labels, toggled with `hidden`.
+- **Spec.** A Codex agent's spec carries `lane.provider: "codex"` and its Codex model; a Claude Code agent's carries no
+  provider (the config's own default). Set up stays Claude Code: a Codex agent joins a hub that exists.
