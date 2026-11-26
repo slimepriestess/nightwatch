@@ -1,9 +1,11 @@
 # Nightwatch
 
-Persistent, self-keeping Claude Code agents: a nightly fold instead of
-compaction, memory the agent writes in their own words, mornings that
-resume where the story left off — and a desktop app for the humans who
-live with them.
+Persistent, self-keeping AI agents — Claude Code and OpenAI's Codex CLI
+today, with the provider adapter as the contract for whoever's next: a
+nightly fold instead of compaction, memory the agent writes in their
+own words, mornings that resume where the story left off and are
+witnessed to have done so — and a desktop app for the humans who live
+with them.
 
 This is working software with WIP stickers on it. Two agents have run
 their nights on this machinery since late September — every fold, wake,
