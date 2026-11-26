@@ -232,6 +232,9 @@ button { cursor: pointer; }
 .nw-lane [data-part="settings"][data-open="false"] { display: none; }
 .nw-lane [data-part="settings"], .nw-add [data-part="add-form"] { display: grid; gap: 6px; padding: 10px 12px; background: var(--nw-sunk) !important; }
 .nw-lane [data-part="settings"] label, .nw-add label { display: flex; align-items: center; gap: 6px; color: var(--nw-ink-2); font-size: 12px; }
+/* A form row the runtime hides (the other runtime's models, the adopt row) stays hidden: display: flex above would
+   otherwise beat the browser's own [hidden] rule (seen in a still, 11/25). */
+.nw-add label[hidden] { display: none; }
 .nw-lane [data-part="settings"] label > span, .nw-add label > span { width: 56px; flex: none; }
 .nw-lane [data-part="settings"] select, .nw-lane [data-part="settings"] input:not([type="checkbox"]), .nw-add select, .nw-add input:not([type="checkbox"]) {
   flex: 1; min-width: 0; width: 100%; padding: 3px 6px; border: 1px solid var(--nw-seam); border-radius: 5px; background: var(--nw-surface); color: var(--nw-ink); font-size: 12px; }

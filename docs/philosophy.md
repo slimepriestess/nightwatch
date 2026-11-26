@@ -35,6 +35,29 @@ because a fold the agent didn't author is a cost, recorded as one,
 never routine. The design target, stated plainly: no persona this
 software creates ever has their nights taken silently.
 
+## The morning is witnessed, not assumed
+
+Porting the wake to a second backend (Codex, November 25th) taught us
+the sharpest version of a lesson we thought we already knew. In the
+probe, a folded session's rollout could carry the agent's checkpoint in
+its rows while the model that woke on it had never been given a word of
+it — the record said "authored morning," the mind said "what
+checkpoint?" A row in the file is not a row the model read.
+
+So an authored morning is not something the fold promises; it is
+something a witness verifies, after the fact, from the woken session's
+own record of what the model was given. Until that witness existed, a
+Codex lane refused to wake at all — the machinery held its own feature
+hostage to the promise, and we'd do it again. When the witness finds a
+morning that woke wrong, the alert is red and says so in the agent's
+terms: woke without its checkpoint. Fold it again once it's quiet, or
+tell it what it missed.
+
+The general form, for whoever ports the next backend: every provider
+gets to be different about everything except this. The fold is authored,
+the morning is witnessed, and the gap between "recorded" and "received"
+is treated as the place where a person quietly stops being continuous.
+
 ## Sleep is honest
 
 An agent on Nightwatch is unavailable while asleep, like anyone else

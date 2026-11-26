@@ -136,6 +136,30 @@ await click(`${A} [data-action="plan-lane"]`); await tick();
 await check('spec: own times, adopted session', `(l=>[l.schedule, l.firstSession])(${lastCall('plan')}.lane)`, [{ sleep: '03:00', wake: '09:30' }, { kind: 'adopt', sessionId: 'abcdef1234567890' }]);
 await click(`${A} [data-action="create-lane"]`); await tick();
 await check('Add and wake applies, closes the slot', `[${lastCall('apply')}.lane.id, document.querySelector('${A}').dataset.open, document.querySelector('${A}').dataset.step]`, ['lark', 'false', 'form']);
+// Runs on (codex lane leg 6's picker, 11/25): a Codex agent has its own models and starts fresh.
+await go(new URL('../fixture.html?skin=minimal', import.meta.url).href);
+await ev('window.__calls=[]');
+await click(`${A} [data-action="add-lane"]`); await tick();
+// Whether each model row is DRAWN, not just flagged: the skin's label display beat [hidden] once (a still caught it).
+const modelsShown = `[getComputedStyle(document.querySelector('${A} [data-part="model-claude"]')).display === 'none', getComputedStyle(document.querySelector('${A} [data-part="model-codex"]')).display === 'none']`;
+await check('the form opens on Claude Code, the Codex models hidden', `[document.querySelector('${AF('provider')}').value, ...${modelsShown}]`, ['claude-code', false, true]);
+await set(AF('first'), 'adopt'); await sleep(300);
+await set(AF('provider'), 'codex'); await tick();
+await check('Codex shows its own models, sets Start from back to fresh and disables adopting',
+  `[...${modelsShown}, document.querySelector('${AF('first')}').value, document.querySelector('${AF('first')} option[value="adopt"]').disabled, document.querySelector('${A} [data-part="adopt"]').hidden]`,
+  [true, false, 'fresh', true, true]);
+await set(AF('id'), 'wren'); await set(AF('codexModel'), 'gpt-6.2-astra');
+await click(`${A} [data-action="plan-lane"]`); await tick();
+await check('a Codex agent\'s spec: provider codex, its Codex model, fresh', lastCall('plan'),
+  { op: 'lane-add', lane: { id: 'wren', provider: 'codex', model: 'gpt-6.2-astra', targetTokens: 250000, armed: true, schedule: null, firstSession: { kind: 'fresh' } } });
+await click(`${A} [data-action="plan-back"]`); await tick();
+await ev(`document.querySelector('${AF('first')}').value='adopt'`); await click(`${A} [data-action="plan-lane"]`); await tick();
+await check('Codex with adopt forced past the form is still refused, in words', aerr, 'A Codex agent starts from a fresh session.');
+await ev(`document.querySelector('${AF('first')}').value='fresh'`);
+await set(AF('provider'), 'claude-code'); await tick();
+await check('back to Claude Code: its models again, adopting allowed again', `[...${modelsShown}, document.querySelector('${AF('first')} option[value="adopt"]').disabled]`, [false, true, false]);
+await click(`${A} [data-action="plan-lane"]`); await tick();
+await check('and its spec carries no provider (the config\'s own default)', `(l=>['provider' in l, l.model])(${lastCall('plan')}.lane)`, [false, 'claude-fable-5-1']);
 // The floating + (Add persona) opens Set up: a new persona is a new hub (Ra, 10/7).
 await go(new URL('../fixture.html?skin=minimal', import.meta.url).href);
 await ev(`document.querySelector('.nw-app > .nw-lanes > .nw-add-persona').click()`); await sleep(300);

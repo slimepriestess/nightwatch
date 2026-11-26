@@ -243,7 +243,9 @@
       <button type="button" data-action="add-lane" data-part="add" aria-expanded="false"><svg class="nw-icon" data-icon="plus" aria-hidden="true"><use href="#i-plus"/></svg><span>Add agent</span></button>
       <form data-part="add-form" aria-label="New agent">
         <label><span>Lane name</span><input type="text" data-field="id" placeholder="e.g. scout" autocomplete="off" spellcheck="false"></label>
-        <label><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label><span>Runs on</span><select data-field="provider"><option value="claude-code">Claude Code</option><option value="codex">Codex</option></select></label>
+        <label data-part="model-claude"><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label data-part="model-codex" hidden><span>Model</span><select data-field="codexModel"><option value="gpt-6.2-sol">GPT-6.2-Sol</option><option value="gpt-6.2-astra">GPT-6.2-Astra</option><option value="gpt-6.1-terra">GPT-6.1 Terra</option></select></label>
         <label data-part="global-schedule"><input type="checkbox" data-field="inherit" checked><span>Use global nightshift settings</span></label>
         <div data-part="own-schedule"><label><svg class="nw-icon" data-icon="moon" aria-hidden="true"><use href="#i-moon"/></svg> Sleep <input type="time" data-field="sleep" value="02:00" disabled></label>
           <label><svg class="nw-icon" data-icon="sun" aria-hidden="true"><use href="#i-sun"/></svg> Wake <input type="time" data-field="wake" value="08:00" disabled></label></div>
@@ -303,7 +305,9 @@
       <button type="button" data-action="add-lane" data-part="add" aria-expanded="false"><svg class="nw-icon" data-icon="plus" aria-hidden="true"><use href="#i-plus"/></svg><span>Add agent</span></button>
       <form data-part="add-form" aria-label="New agent">
         <label><span>Lane name</span><input type="text" data-field="id" placeholder="e.g. scout" autocomplete="off" spellcheck="false"></label>
-        <label><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label><span>Runs on</span><select data-field="provider"><option value="claude-code">Claude Code</option><option value="codex">Codex</option></select></label>
+        <label data-part="model-claude"><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label data-part="model-codex" hidden><span>Model</span><select data-field="codexModel"><option value="gpt-6.2-sol">GPT-6.2-Sol</option><option value="gpt-6.2-astra">GPT-6.2-Astra</option><option value="gpt-6.1-terra">GPT-6.1 Terra</option></select></label>
         <label data-part="global-schedule"><input type="checkbox" data-field="inherit" checked><span>Use global nightshift settings</span></label>
         <div data-part="own-schedule"><label><svg class="nw-icon" data-icon="moon" aria-hidden="true"><use href="#i-moon"/></svg> Sleep <input type="time" data-field="sleep" value="02:00" disabled></label>
           <label><svg class="nw-icon" data-icon="sun" aria-hidden="true"><use href="#i-sun"/></svg> Wake <input type="time" data-field="wake" value="08:00" disabled></label></div>
@@ -648,7 +652,9 @@
       <button type="button" data-action="add-lane" data-part="add" aria-expanded="true"><svg class="nw-icon" data-icon="plus" aria-hidden="true"><use href="#i-plus"/></svg><span>Add agent</span></button>
       <form data-part="add-form" aria-label="New agent">
         <label><span>Lane name</span><input type="text" data-field="id" placeholder="e.g. scout" autocomplete="off" spellcheck="false"></label>
-        <label><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label><span>Runs on</span><select data-field="provider"><option value="claude-code">Claude Code</option><option value="codex">Codex</option></select></label>
+        <label data-part="model-claude"><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label data-part="model-codex" hidden><span>Model</span><select data-field="codexModel"><option value="gpt-6.2-sol">GPT-6.2-Sol</option><option value="gpt-6.2-astra">GPT-6.2-Astra</option><option value="gpt-6.1-terra">GPT-6.1 Terra</option></select></label>
         <label data-part="global-schedule"><input type="checkbox" data-field="inherit" checked><span>Use global nightshift settings</span></label>
         <div data-part="own-schedule"><label><svg class="nw-icon" data-icon="moon" aria-hidden="true"><use href="#i-moon"/></svg> Sleep <input type="time" data-field="sleep" value="02:00" disabled></label>
           <label><svg class="nw-icon" data-icon="sun" aria-hidden="true"><use href="#i-sun"/></svg> Wake <input type="time" data-field="wake" value="08:00" disabled></label></div>
@@ -672,7 +678,9 @@
       <button type="button" data-action="add-lane" data-part="add" aria-expanded="true"><svg class="nw-icon" data-icon="plus" aria-hidden="true"><use href="#i-plus"/></svg><span>Add agent</span></button>
       <form data-part="add-form" aria-label="New agent">
         <label><span>Lane name</span><input type="text" data-field="id" placeholder="e.g. scout" autocomplete="off" spellcheck="false"></label>
-        <label><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label><span>Runs on</span><select data-field="provider"><option value="claude-code">Claude Code</option><option value="codex">Codex</option></select></label>
+        <label data-part="model-claude"><span>Model</span><select data-field="model"><option value="claude-fable-5-1">Fable 5.1</option><option value="claude-opus-5-5">Opus 5.5</option><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option></select></label>
+        <label data-part="model-codex" hidden><span>Model</span><select data-field="codexModel"><option value="gpt-6.2-sol">GPT-6.2-Sol</option><option value="gpt-6.2-astra">GPT-6.2-Astra</option><option value="gpt-6.1-terra">GPT-6.1 Terra</option></select></label>
         <label data-part="global-schedule"><input type="checkbox" data-field="inherit" checked><span>Use global nightshift settings</span></label>
         <div data-part="own-schedule"><label><svg class="nw-icon" data-icon="moon" aria-hidden="true"><use href="#i-moon"/></svg> Sleep <input type="time" data-field="sleep" value="02:00" disabled></label>
           <label><svg class="nw-icon" data-icon="sun" aria-hidden="true"><use href="#i-sun"/></svg> Wake <input type="time" data-field="wake" value="08:00" disabled></label></div>

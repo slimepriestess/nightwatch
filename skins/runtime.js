@@ -757,6 +757,16 @@
       const slot = t.closest('.nw-add');
       const globalTimes = $$('.nw-head [data-part="schedule"] time').map((x) => x.getAttribute('datetime'));
       ['sleep', 'wake'].forEach((n, i) => { const f = field(slot, n); if (!f) return; f.disabled = t.checked; if (t.checked && globalTimes[i]) f.value = globalTimes[i]; });
+    } else if (t.matches('.nw-add [data-field="provider"]')) {
+      // Runs on (codex lane leg 6): each runtime has its own models, and a codex agent starts fresh (lane-add
+      // refuses adopting into codex), so "an existing Claude Code session" is set back and disabled.
+      const slot = t.closest('.nw-add'), codex = t.value === 'codex';
+      const mc = $('[data-part="model-claude"]', slot), mx = $('[data-part="model-codex"]', slot);
+      if (mc) mc.hidden = codex;
+      if (mx) mx.hidden = !codex;
+      const first = field(slot, 'first'), adoptOpt = first && $('option[value="adopt"]', first);
+      if (adoptOpt) adoptOpt.disabled = codex;
+      if (codex && first && first.value === 'adopt') { first.value = 'fresh'; const row = $('[data-part="adopt"]', slot); if (row) row.hidden = true; }
     } else if (t.matches('.nw-add [data-field="first"]')) {
       const slot = t.closest('.nw-add'), row = $('[data-part="adopt"]', slot);
       if (row) row.hidden = t.value !== 'adopt';
@@ -821,11 +831,14 @@
     const inherit = field(slot, 'inherit')?.checked ?? true;
     const sleep = val(slot, 'sleep'), wake = val(slot, 'wake');
     if (!inherit && !(TIME.test(sleep) && TIME.test(wake))) throw new Error('Sleep and wake need times like 02:00.');
+    const codex = val(slot, 'provider') === 'codex';
     const adopt = val(slot, 'first') === 'adopt';
     const sessionId = val(slot, 'session');
+    if (codex && adopt) throw new Error('A Codex agent starts from a fresh session.');
     if (adopt && !sessionId) throw new Error('Pick the running session to adopt, or start from a fresh session.');
     return { op: 'lane-add', lane: {
-      id, model: val(slot, 'model'), targetTokens: k * 1000, armed: field(slot, 'armed')?.checked ?? true,
+      id, ...(codex ? { provider: 'codex', model: val(slot, 'codexModel') } : { model: val(slot, 'model') }),
+      targetTokens: k * 1000, armed: field(slot, 'armed')?.checked ?? true,
       schedule: inherit ? null : { sleep, wake },
       firstSession: adopt ? { kind: 'adopt', sessionId } : { kind: 'fresh' } } };
   }
